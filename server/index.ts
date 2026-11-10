@@ -20,7 +20,8 @@ const { PLATFORMS, isPlatform, emptyData } = await import('./platforms/index');
 const { Meta } = await import('./platforms/meta');
 const { oauthRouter } = await import('./oauth');
 
-const PORT = Number(process.env.API_PORT || 4000);
+// PORT lo asigna el hosting (Hostinger); API_PORT es para desarrollo local
+const PORT = Number(process.env.PORT || process.env.API_PORT || 4000);
 const APP_PASSWORD = process.env.APP_PASSWORD;
 if (!APP_PASSWORD) {
     console.error('\n✖ Falta APP_PASSWORD. Agrega una línea "APP_PASSWORD=tu-contraseña" en .env.local y reinicia.\n');
