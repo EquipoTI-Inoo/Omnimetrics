@@ -1,0 +1,21 @@
+# Dependencias y builds
+node_modules
+dist
+dist-ssr
+*.local
+
+# Secretos y datos del servidor (credenciales cifradas + clave)
+.env
+.env.*
+!.env.example
+server/data/
+
+# Editor / SO
+.vscode/*
+!.vscode/extensions.json
+.idea
+.DS_Store
+*.log
+
+# Claude Code (local)
+.claude/settings.local.json

@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>OmniMetrics AI - Marketing Intelligence</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+      tailwind.config = {
+        darkMode: 'class',
+        theme: {
+          extend: {
+            fontFamily: {
+              sans: ['Instrument Sans', 'system-ui', 'sans-serif'],
+              mono: ['IBM Plex Mono', 'monospace'],
+            },
+            colors: {
+              indigo: { 50:'#ECFDF8',100:'#CFF3EC',200:'#A3E6D8',300:'#6DD3BF',400:'#2DD4BF',500:'#14A38B',600:'#0E7C66',700:'#0B6B5A',800:'#0B5A4A',900:'#0A3F35',950:'#052A23' },
+              slate: { 50:'#F4F3EE',100:'#ECEAE2',200:'#E3E1D8',300:'#C9C6BA',400:'#9AA1AC',500:'#5A606B',600:'#4A505A',700:'#2A313A',800:'#1D2229',900:'#14171C',950:'#0E1115' }
+            }
+          }
+        }
+      }
+    </script>
+    <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+      body {
+        font-family: 'Instrument Sans', system-ui, sans-serif;
+        background-color: #F4F3EE;
+      }
+      .dark body {
+        background-color: #14171C;
+      }
+      /* Custom scrollbar for tables */
+      .custom-scrollbar::-webkit-scrollbar {
+        height: 8px;
+        width: 8px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-track {
+        background: #f1f1f1;
+      }
+      .dark .custom-scrollbar::-webkit-scrollbar-track {
+        background: #1e293b;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb {
+        background: #cbd5e1;
+        border-radius: 4px;
+      }
+      .custom-scrollbar::-webkit-scrollbar-thumb:hover {
+        background: #94a3b8;
+      }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+  <script type="module" src="/index.tsx"></script>
+</body>
+</html>
