@@ -148,7 +148,13 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, focusWidgetId,
 
   const [pipelineId, setPipelineId] = usePipelineSelection(data.kommo.pipelines, 'dashboard', false);
   const pipeline = data.kommo.pipelines.find(p => p.id === pipelineId);
-  const stages = pipeline?.stages || [];
+  // Open stages: active leads right now (like Kommo's board). Won/lost: closed within the period,
+  // shown apart so thousands of lost leads don't flatten the scale of the open stages.
+  const allStages = pipeline?.stages || [];
+  const stages = allStages.filter(s => !s.closed);
+  const wonStage = allStages.find(s => s.closed === 'won');
+  const lostStage = allStages.find(s => s.closed === 'lost');
+  const activeLeads = stages.reduce((s, st) => s + st.count, 0);
   const maxStage = Math.max(1, ...stages.map(s => s.count));
   const negotiation = stages.reduce((s, st) => s + (st.value || 0), 0);
 
@@ -268,17 +274,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, focusWidgetId,
           subtitle={data.kommo.pipelines.length > 1
             ? <PipelineSelect pipelines={data.kommo.pipelines} value={pipelineId} onChange={setPipelineId} className="w-full mt-1" />
             : (pipeline?.name || 'Sin pipeline')}>
+          <div className="flex justify-between items-baseline text-[12px] text-[#5A606B] dark:text-gray-400 -mb-1">
+            <span>Leads activos hoy, por etapa</span>
+            <span className="font-semibold tabular-nums text-[#14171C] dark:text-white">{activeLeads.toLocaleString()}</span>
+          </div>
           <div className="flex flex-col gap-2.5">
             {stages.map(s => (
               <div key={s.id} className="flex items-center gap-3">
-                <span className="w-[88px] sm:w-[104px] shrink-0 text-[13px] truncate">{s.name}</span>
+                <span className="w-[88px] sm:w-[104px] shrink-0 text-[13px] truncate" title={s.name}>{s.name}</span>
                 <div className="flex-1 bg-[#F0EEE7] dark:bg-slate-700 rounded-md h-[22px] overflow-hidden"><div className="h-full rounded-md" style={{ width: (s.count / maxStage * 100) + '%', background: s.color }} /></div>
                 <span className="w-10 text-right font-mono text-xs">{s.count}</span>
               </div>
             ))}
           </div>
+          {(wonStage || lostStage) && (
+            <div className="grid grid-cols-2 gap-2.5">
+              {[{ s: wonStage, label: 'Ganadas', tone: 'bg-[#DDF5EC] text-[#0B5A44]' }, { s: lostStage, label: 'Perdidas', tone: 'bg-[#FCE4E1] text-[#A3201A]' }]
+                .filter(x => x.s).map(({ s, label, tone }) => (
+                  <div key={label} className={`rounded-xl px-3 py-2 ${tone}`}>
+                    <div className="text-[11px] font-medium">{label} en el periodo</div>
+                    <div className="text-lg font-bold tabular-nums leading-tight">{s!.count.toLocaleString()}</div>
+                  </div>
+                ))}
+            </div>
+          )}
           <div className="mt-auto border-t border-[#ECEAE2] dark:border-slate-700 pt-3.5 flex justify-between text-[13px]">
-            <span className="text-[#5A606B]">Valor en pipeline</span><span className="font-bold tabular-nums">{money(negotiation)}</span>
+            <span className="text-[#5A606B]" title="Suma del valor de los leads activos">Valor en pipeline</span><span className="font-bold tabular-nums">{money(negotiation)}</span>
           </div>
         </Card>
       </section>

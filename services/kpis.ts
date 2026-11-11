@@ -89,7 +89,7 @@ export const platformKpis = (data: GlobalData) => {
       sales: sum(kommo.agents, a => a.sales),
       leadConversion: ratio(sum(kommo.agents, a => a.sales), kommoLeads) * 100,
       leads: kommoLeads,
-      opportunities: sum(kommo.pipelines, p => sum(p.stages, s => s.count)),
+      opportunities: sum(kommo.pipelines, p => sum(p.stages.filter(s => !s.closed), s => s.count)),
       lost: sum(kommo.lossReasons, l => l.count),
     },
   };

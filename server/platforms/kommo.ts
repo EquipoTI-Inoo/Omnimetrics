@@ -100,14 +100,29 @@ export const Kommo = {
         ]);
         const users = new Map<number, string>(embedded(usersRes, 'users').map((u: any) => [u.id, u.name]));
         const reasonName = new Map<number, string>(embedded(reasonsRes, 'loss_reasons').map((r: any) => [r.id, r.name]));
-        const wonFilter = embedded(pipesRes, 'pipelines')
-            .map((p: any, i: number) => `filter[statuses][${i}][pipeline_id]=${p.id}&filter[statuses][${i}][status_id]=${WON}`).join('&');
+        const allPipes = embedded(pipesRes, 'pipelines');
+        const statusFilter = (pairs: [number, number][]) => pairs
+            .map(([pid, sid], i) => `filter[statuses][${i}][pipeline_id]=${pid}&filter[statuses][${i}][status_id]=${sid}`).join('&');
+        const openPairsOf = (p: any) => embedded(p, 'statuses')
+            .filter((s: any) => s.id !== WON && s.id !== LOST).map((s: any) => [p.id, s.id] as [number, number]);
+        const closedPairs = allPipes.flatMap((p: any) => [[p.id, WON], [p.id, LOST]] as [number, number][]);
+        // Newest first: if a query hits the page cap, the oldest leads are the ones left out
+        const NEWEST = 'order[id]=desc';
+        const none = Promise.resolve([] as any[]);
 
-        // leads: created in the range (pipeline, agents, channels). closed: won in the range (sales over time).
-        const [leads, closed] = await Promise.all([
-            listLeads(`filter[created_at][from]=${from}&filter[created_at][to]=${to}`),
-            opts.light || !wonFilter ? Promise.resolve([] as any[])
-                : listLeads(`filter[closed_at][from]=${from}&filter[closed_at][to]=${to}&${wonFilter}`),
+        // leads:  created in the range (agents, channels).
+        // active: open right now, whatever their creation date: the board exactly as Kommo shows it.
+        //         One query per pipeline so each gets its own page cap. Skipped for the previous
+        //         period: a snapshot of "now" has no previous value.
+        // closed: won or lost in the range (won/lost stages, loss reasons, sales over time).
+        const [leads, active, closed] = await Promise.all([
+            listLeads(`filter[created_at][from]=${from}&filter[created_at][to]=${to}&${NEWEST}`),
+            opts.light ? none : Promise.all(allPipes.map((p: any) => {
+                const open = openPairsOf(p);
+                return open.length ? listLeads(`${statusFilter(open)}&${NEWEST}`) : none;
+            })).then(lists => lists.flat()),
+            !closedPairs.length ? none
+                : listLeads(`filter[closed_at][from]=${from}&filter[closed_at][to]=${to}&${statusFilter(closedPairs)}&${NEWEST}`),
         ]);
 
         const agentsOf = (set: any[]) => {
@@ -165,35 +180,39 @@ export const Kommo = {
         };
 
         // Each pipeline carries its own stats so the UI can switch between them.
-        // Archived pipelines are only listed when they still have leads in the range.
-        const pipelines = embedded(pipesRes, 'pipelines')
+        // Open stages count active leads (snapshot); won/lost count leads closed in the range.
+        // Archived pipelines are only listed when they still have leads.
+        const pipelines = allPipes
             .map((p: any) => {
                 const own = leads.filter(l => l.pipeline_id === p.id);
+                const ownActive = active.filter(l => l.pipeline_id === p.id);
                 const ownClosed = closed.filter(l => l.pipeline_id === p.id);
                 return {
                     id: String(p.id),
                     name: p.name,
                     archived: !!p.is_archive,
-                    leadCount: own.length,
+                    leadCount: own.length + ownActive.length + ownClosed.length,
                     stages: embedded(p, 'statuses').map((s: any) => {
-                        const inStage = own.filter(l => l.status_id === s.id);
+                        const kind = s.id === WON ? 'won' : s.id === LOST ? 'lost' : undefined;
+                        const inStage = (kind ? ownClosed : ownActive).filter(l => l.status_id === s.id);
                         return {
                             id: String(s.id),
-                            name: s.name,
+                            name: s.name?.trim() || (kind === 'won' ? 'Ventas ganadas' : kind === 'lost' ? 'Ventas perdidas' : 'Sin nombre'),
                             count: inStage.length,
                             value: inStage.reduce((sum, l) => sum + num(l.price), 0),
                             color: s.color || '#cccccc',
+                            ...(kind ? { closed: kind } : {}),
                         };
                     }),
                     agents: agentsOf(own),
-                    lossReasons: lossReasonsOf(own),
+                    lossReasons: lossReasonsOf(ownClosed),
                     salesHistory: opts.light ? [] : salesHistoryOf(ownClosed),
                 };
             })
             .filter((p: any) => !p.archived || p.leadCount > 0);
 
         const agents = agentsOf(leads);
-        const lossReasons = lossReasonsOf(leads);
+        const lossReasons = lossReasonsOf(closed);
         const salesHistory = salesHistoryOf(closed);
 
         // Channel = UTM source captured by Kommo, else the lead's first tag

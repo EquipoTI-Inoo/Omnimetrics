@@ -173,7 +173,7 @@ export const generateKommoPipelines = (range: DateRange): KommoPipeline[] => {
         { id: 'st2', name: 'Contactado', count: Math.round(95 * m), value: 0, color: '#60a5fa' },
         { id: 'st3', name: 'Demo Agendada', count: Math.round(45 * m), value: 0, color: '#818cf8' },
         { id: 'st4', name: 'Negociación', count: Math.round(20 * m), value: Math.round(1200000 * m), color: '#fbbf24' },
-        { id: 'st5', name: 'Cierre Ganado', count: Math.round(12 * m), value: Math.round(850000 * m), color: '#4ade80' },
+        { id: 'st5', name: 'Cierre Ganado', count: Math.round(12 * m), value: Math.round(850000 * m), color: '#4ade80', closed: 'won' },
     ];
     const pipe2: PipelineStage[] = [
         { id: 'st6', name: 'Solicitud', count: Math.round(60 * m), value: 0, color: '#94a3b8' },

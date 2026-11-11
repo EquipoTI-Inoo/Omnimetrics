@@ -211,6 +211,8 @@ export interface PipelineStage {
   count: number;
   value: number;
   color: string;
+  /** Kommo's terminal stages: counted over the date range instead of as a snapshot of active leads */
+  closed?: 'won' | 'lost';
   [key: string]: any;
 }
 
