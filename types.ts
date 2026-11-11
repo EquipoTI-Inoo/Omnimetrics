@@ -215,6 +215,12 @@ export interface KommoPipeline {
   id: string;
   name: string;
   stages: PipelineStage[];
+  archived?: boolean;
+  leadCount?: number;
+  /** Stats limited to this pipeline's leads (absent in older cached data / demo) */
+  agents?: AgentPerformance[];
+  lossReasons?: LossReason[];
+  salesHistory?: SalesRepHistory[];
 }
 
 export interface AgentPerformance {

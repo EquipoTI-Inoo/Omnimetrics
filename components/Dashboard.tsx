@@ -4,11 +4,12 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   BarChart, Bar, Legend, ComposedChart, Line, LineChart, PieChart, Pie, Cell
 } from 'recharts';
-import { Plus, Trash2, Activity, Sparkles, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { Plus, Trash2, Activity, Sparkles, ArrowUpRight, ArrowDownRight, ArrowDown } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { DateRangePicker } from './DateRangePicker';
 import { WidgetEngine } from '../services/widgetEngine';
 import { pctChange } from '../services/kpis';
+import { PipelineSelect, usePipelineSelection } from './KommoWidgets';
 
 const money = (n: number) => '$' + Math.round(n).toLocaleString('en-US');
 const compact = (n: number) => n >= 1e6 ? (n / 1e6).toFixed(2) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(1) + 'k' : String(Math.round(n));
@@ -42,11 +43,11 @@ const StatCard = ({ title, value, change, sub, color, spark, invert, neutral }: 
   );
 };
 
-const Card: React.FC<{ title: string; subtitle?: string; className?: string; children: React.ReactNode }> = ({ title, subtitle, className = '', children }) => (
+const Card: React.FC<{ title: string; subtitle?: React.ReactNode; className?: string; children: React.ReactNode }> = ({ title, subtitle, className = '', children }) => (
   <article className={`bg-white dark:bg-slate-800 border border-[#E3E1D8] dark:border-slate-700 rounded-2xl p-6 flex flex-col gap-4 min-w-0 ${className}`}>
     <div>
       <h2 className="text-lg font-bold text-[#14171C] dark:text-white">{title}</h2>
-      {subtitle && <p className="text-[13px] text-[#5A606B] dark:text-gray-400 mt-1">{subtitle}</p>}
+      {subtitle && <div className="text-[13px] text-[#5A606B] dark:text-gray-400 mt-1">{subtitle}</div>}
     </div>
     {children}
   </article>
@@ -70,11 +71,32 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, focusWidgetId,
     if (focusWidgetId) document.getElementById(`widget-${focusWidgetId}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
   }, [focusWidgetId]);
 
-  const funnel = [
-    { name: 'Impresiones', value: bm.totalImpressions, color: '#14171C', w: 100, note: 'Alcance total pagado' },
-    { name: 'Clics', value: bm.totalClicks, color: '#0B8A6A', w: 64, note: `${bm.totalImpressions ? (bm.totalClicks / bm.totalImpressions * 100).toFixed(2) : 0}% de las impresiones` },
-    { name: 'Conversiones', value: bm.totalConversions, color: '#2F5BEA', w: 38, note: `${bm.totalClicks ? (bm.totalConversions / bm.totalClicks * 100).toFixed(1) : 0}% de los clics` },
-    { name: 'Ventas (estimado)', value: Math.round(bm.totalConversions * 0.8), color: '#C98400', w: 30, note: '80% de cierre estimado sobre conversiones' },
+  // Funnel: each stage is a count from its real source; what matters is the rate between steps
+  // (values differ by orders of magnitude, so bars sized by volume would say nothing) and its cost.
+  const kommoConnected = data.kommo.pipelines.length > 0;
+  const crmSales = data.kommo.agents.reduce((s, a) => s + a.sales, 0);
+  const rate = (a: number, b: number) => b > 0 ? a / b * 100 : null;
+  const fmtRate = (r: number | null) => r == null ? '—' : `${r < 10 ? r.toFixed(2) : r.toFixed(1)}%`;
+  const costPer = (n: number) => n > 0 && bm.totalSpend > 0 ? bm.totalSpend / n : null;
+  const salesStep = (() => {
+    const r = rate(crmSales, bm.totalConversions);
+    return r != null && r > 100
+      ? { rate: null, label: 'más ventas que conversiones: incluye ventas no atribuidas a anuncios' }
+      : { rate: r, label: 'se cierra como venta' };
+  })();
+  const funnel: { name: string; source: string; value: number; color: string; cost: number | null; costLabel: string; step?: { rate: number | null; label: string } }[] = [
+    { name: 'Impresiones', source: 'Veces que se mostraron tus anuncios', value: bm.totalImpressions, color: '#14171C',
+      cost: costPer(bm.totalImpressions / 1000), costLabel: 'CPM' },
+    { name: 'Clics', source: 'Visitas desde los anuncios', value: bm.totalClicks, color: '#0B8A6A',
+      cost: costPer(bm.totalClicks), costLabel: 'CPC',
+      step: { rate: rate(bm.totalClicks, bm.totalImpressions), label: 'hace clic (CTR)' } },
+    { name: 'Conversiones', source: 'Reportadas por las plataformas de anuncios', value: bm.totalConversions, color: '#2F5BEA',
+      cost: costPer(bm.totalConversions), costLabel: 'CPA',
+      step: { rate: rate(bm.totalConversions, bm.totalClicks), label: 'convierte (tasa de conversión)' } },
+    ...(kommoConnected ? [{
+      name: 'Ventas ganadas', source: 'Cerradas en Kommo (todas las fuentes)', value: crmSales, color: '#C98400',
+      cost: costPer(crmSales), costLabel: 'Costo por venta', step: salesStep,
+    }] : []),
   ];
 
   const sum = (arr: any[], k: string) => arr.reduce((s, c) => s + c[k], 0);
@@ -116,7 +138,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, focusWidgetId,
   const spendSpark = sparkOf(trendData.map(t => t.spend), [4,5,5,6,6,7,8,8,9]);
   const revenueSpark = sparkOf([...buckets.values()].map(b => b.revenue), [3,4,4,6,5,7,8,9,11]);
 
-  const stages = data.kommo.pipelines[0]?.stages || [];
+  const [pipelineId, setPipelineId] = usePipelineSelection(data.kommo.pipelines, 'dashboard', false);
+  const pipeline = data.kommo.pipelines.find(p => p.id === pipelineId);
+  const stages = pipeline?.stages || [];
   const maxStage = Math.max(1, ...stages.map(s => s.count));
   const negotiation = stages.reduce((s, st) => s + (st.value || 0), 0);
 
@@ -176,15 +200,35 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, focusWidgetId,
             )}
           </div>
         </Card>
-        <Card title="Embudo de marketing" subtitle="De impresión a venta cerrada" className="flex-[1_1_320px]">
-          <div className="flex flex-col gap-3">
+        <Card title="Embudo de conversión" subtitle="Cuántos avanzan a cada paso y cuánto cuesta cada uno" className="flex-[1_1_320px]">
+          <div className="flex flex-col">
             {funnel.map(f => (
-              <div key={f.name} className="flex flex-col gap-1.5">
-                <div className="flex justify-between text-[13px]"><span className="font-semibold">{f.name}</span><span className="font-mono">{compact(f.value)}</span></div>
-                <div className="bg-[#F0EEE7] dark:bg-slate-700 rounded-lg h-6 overflow-hidden"><div className="h-full rounded-lg transition-all duration-700" style={{ width: f.w + '%', background: f.color }} /></div>
-                <span className="text-[11px] text-[#5A606B] dark:text-gray-400">{f.note}</span>
-              </div>
+              <React.Fragment key={f.name}>
+                {f.step && (
+                  <div className="flex items-center gap-2 pl-4 py-1.5 text-[12px] text-[#5A606B] dark:text-gray-400">
+                    <ArrowDown className="h-3.5 w-3.5 shrink-0" />
+                    {f.step.rate != null && <span className="font-bold tabular-nums text-[#14171C] dark:text-white">{fmtRate(f.step.rate)}</span>}
+                    <span className="leading-snug">{f.step.label}</span>
+                  </div>
+                )}
+                <div className="flex items-center gap-3 rounded-xl border border-[#ECEAE2] dark:border-slate-700 pl-3 pr-4 py-2.5">
+                  <span className="w-1 self-stretch rounded-full shrink-0" style={{ background: f.color }} />
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13px] font-semibold">{f.name}</div>
+                    <div className="text-[11px] text-[#5A606B] dark:text-gray-400 leading-snug">{f.source}</div>
+                  </div>
+                  <div className="text-right shrink-0">
+                    <div className="text-lg font-bold tabular-nums leading-tight" title={f.value.toLocaleString()}>{compact(f.value)}</div>
+                    <div className="text-[11px] text-[#5A606B] dark:text-gray-400 tabular-nums">
+                      {f.costLabel} {f.cost == null ? '—' : `$${f.cost.toLocaleString('en-US', { maximumFractionDigits: 2 })}`}
+                    </div>
+                  </div>
+                </div>
+              </React.Fragment>
             ))}
+            {!kommoConnected && (
+              <p className="text-[11px] text-[#5A606B] dark:text-gray-400 mt-3">Conecta Kommo para ver cuántas conversiones terminan en venta.</p>
+            )}
           </div>
         </Card>
       </section>
@@ -212,7 +256,10 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, focusWidgetId,
             </table>
           </div>
         </Card>
-        <Card title="Pipeline Kommo" subtitle={data.kommo.pipelines[0]?.name || 'Sin pipeline'} className="flex-[1_1_320px]">
+        <Card title="Pipeline Kommo" className="flex-[1_1_320px]"
+          subtitle={data.kommo.pipelines.length > 1
+            ? <PipelineSelect pipelines={data.kommo.pipelines} value={pipelineId} onChange={setPipelineId} className="w-full mt-1" />
+            : (pipeline?.name || 'Sin pipeline')}>
           <div className="flex flex-col gap-2.5">
             {stages.map(s => (
               <div key={s.id} className="flex items-center gap-3">

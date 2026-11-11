@@ -3,6 +3,7 @@ import { Platform, CampaignData, AdData, KeywordData, AgentPerformance } from '.
 import { useData } from '../context/DataContext';
 import { DateRangePicker } from './DateRangePicker';
 import { platformKpis, pctChange } from '../services/kpis';
+import { ALL_PIPELINES, LossReasonsChart, PipelineSelect, scopeKommo, usePipelineSelection } from './KommoWidgets';
 import { 
   DollarSign, MousePointer, Eye, Target, Users, TrendingUp, Filter, 
   MapPin, Image as ImageIcon, Search, Phone, UserX, UserCheck, AlertCircle, Unplug, Briefcase, Activity,
@@ -106,6 +107,16 @@ export const Reports: React.FC = () => {
   const visiblePlatforms = Object.values(Platform).filter(p => preferences.visiblePlatforms[p] !== false);
   const [activeTab, setActiveTab] = useState<Platform>(visiblePlatforms[0] || Platform.Meta);
   const [subTab, setSubTab] = useState<'overview' | 'creatives' | 'audience'>('overview');
+
+  // Kommo: everything in its tab follows the selected pipeline
+  const [pipelineId, setPipelineId] = usePipelineSelection(data.kommo.pipelines, 'reports', true);
+  const kommoData = scopeKommo(data.kommo, pipelineId);
+  const kommoKpi = platformKpis({ ...data, kommo: kommoData }).kommo;
+  const prevPipe = previousData?.kommo.pipelines.find(p => p.id === pipelineId);
+  const prevKommoKpi = !previousData ? null
+      : pipelineId === ALL_PIPELINES || prevPipe?.agents ? platformKpis({ ...previousData, kommo: scopeKommo(previousData.kommo, pipelineId) }).kommo
+      : null;
+  const kommoDelta = (m: keyof typeof kommoKpi) => pctChange(kommoKpi[m], prevKommoKpi ? prevKommoKpi[m] : null);
 
   // --- META ADS DASHBOARD ---
   const MetaDashboard = () => {
@@ -382,15 +393,22 @@ export const Reports: React.FC = () => {
 
   // --- KOMMO CRM DASHBOARD ---
   const KommoDashboard = () => {
-      const { agents, salesHistory, lossReasons, pipelines } = data.kommo;
-      
+      const { agents, salesHistory, lossReasons } = kommoData;
+      const k = kommoKpi;
+
       return (
           <div className="space-y-6 animate-in fade-in">
+              {data.kommo.pipelines.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-3">
+                      <span className="text-sm font-medium text-gray-500 dark:text-gray-400">Pipeline</span>
+                      <PipelineSelect pipelines={data.kommo.pipelines} value={pipelineId} onChange={setPipelineId} allowAll className="min-w-[240px]" />
+                  </div>
+              )}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <KpiCard title="Valor Ganado" value={money(kpi.kommo.wonValue)} subValue={`${kpi.kommo.sales.toLocaleString()} ventas cerradas`} trend={delta('kommo', 'wonValue')} icon={Briefcase} colorClass="bg-indigo-100 text-indigo-600" />
-                  <KpiCard title="Tasa Conversión Lead" value={`${kpi.kommo.leadConversion.toFixed(1)}%`} subValue={`Lead → Cliente (${kpi.kommo.leads.toLocaleString()} leads)`} trend={delta('kommo', 'leadConversion')} icon={Target} colorClass="bg-blue-100 text-blue-600" />
-                  <KpiCard title="Oportunidades Activas" value={kpi.kommo.opportunities.toLocaleString()} trend={delta('kommo', 'opportunities')} icon={UserCheck} colorClass="bg-green-100 text-green-600" />
-                  <KpiCard title="Leads Perdidos" value={kpi.kommo.lost.toLocaleString()} trend={delta('kommo', 'lost')} tone="down" icon={UserX} colorClass="bg-red-100 text-red-600" />
+                  <KpiCard title="Valor Ganado" value={money(k.wonValue)} subValue={`${k.sales.toLocaleString()} ventas cerradas`} trend={kommoDelta('wonValue')} icon={Briefcase} colorClass="bg-indigo-100 text-indigo-600" />
+                  <KpiCard title="Tasa Conversión Lead" value={`${k.leadConversion.toFixed(1)}%`} subValue={`Lead → Cliente (${k.leads.toLocaleString()} leads)`} trend={kommoDelta('leadConversion')} icon={Target} colorClass="bg-blue-100 text-blue-600" />
+                  <KpiCard title="Oportunidades Activas" value={k.opportunities.toLocaleString()} trend={kommoDelta('opportunities')} icon={UserCheck} colorClass="bg-green-100 text-green-600" />
+                  <KpiCard title="Leads Perdidos" value={k.lost.toLocaleString()} trend={kommoDelta('lost')} tone="down" icon={UserX} colorClass="bg-red-100 text-red-600" />
               </div>
 
               {/* SALES REP PERFORMANCE - PDF STYLE */}
@@ -462,28 +480,7 @@ export const Reports: React.FC = () => {
                   {/* LOSS REASONS */}
                   <div className="bg-white dark:bg-slate-800 p-6 rounded-xl shadow-sm border border-gray-100 dark:border-slate-700">
                       <h3 className="font-bold text-gray-900 dark:text-white mb-4">Razones de Pérdida</h3>
-                      <div className="h-64 flex items-center justify-center">
-                          <ResponsiveContainer width="100%" height="100%">
-                              <PieChart>
-                                  <Pie
-                                    data={lossReasons}
-                                    cx="50%"
-                                    cy="50%"
-                                    innerRadius={60}
-                                    outerRadius={80}
-                                    paddingAngle={5}
-                                    dataKey="count"
-                                    nameKey="reason"
-                                  >
-                                      {lossReasons.map((entry, index) => (
-                                          <Cell key={`cell-${index}`} fill={COLORS[index % COLORS.length]} />
-                                      ))}
-                                  </Pie>
-                                  <Tooltip />
-                                  <Legend layout="vertical" verticalAlign="middle" align="right" />
-                              </PieChart>
-                          </ResponsiveContainer>
-                      </div>
+                      <LossReasonsChart reasons={lossReasons} />
                   </div>
               </div>
           </div>

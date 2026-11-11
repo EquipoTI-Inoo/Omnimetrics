@@ -175,7 +175,15 @@ export const generateKommoPipelines = (range: DateRange): KommoPipeline[] => {
         { id: 'st4', name: 'Negociación', count: Math.round(20 * m), value: Math.round(1200000 * m), color: '#fbbf24' },
         { id: 'st5', name: 'Cierre Ganado', count: Math.round(12 * m), value: Math.round(850000 * m), color: '#4ade80' },
     ];
-    return [{ id: 'p1', name: 'Ventas B2B Principal', stages: pipe1 }];
+    const pipe2: PipelineStage[] = [
+        { id: 'st6', name: 'Solicitud', count: Math.round(60 * m), value: 0, color: '#94a3b8' },
+        { id: 'st7', name: 'Cotización', count: Math.round(28 * m), value: Math.round(240000 * m), color: '#fbbf24' },
+        { id: 'st8', name: 'Reserva confirmada', count: Math.round(9 * m), value: Math.round(180000 * m), color: '#4ade80' },
+    ];
+    return [
+        { id: 'p1', name: 'Ventas B2B Principal', stages: pipe1 },
+        { id: 'p2', name: 'Salas y Eventos', stages: pipe2 },
+    ];
 };
 
 export const generateAgents = (): AgentPerformance[] => [
