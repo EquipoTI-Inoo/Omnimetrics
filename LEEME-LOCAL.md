@@ -18,8 +18,9 @@ Sirve todo (app + API) desde http://localhost:4000.
 
 ## Backend (carpeta server/)
 
-- Las credenciales se validan contra cada plataforma y se guardan cifradas (AES-256-GCM) en `server/data/connections.enc`.
-- La clave de cifrado está en `server/data/secret.key` (o en `ENCRYPTION_KEY`). No la compartas ni la subas a git. Si la pierdes, vuelve a conectar las plataformas.
+- Las credenciales se validan contra cada plataforma y se guardan cifradas (AES-256-GCM) en `connections.enc`, dentro de la carpeta de datos.
+- La carpeta de datos es `server/data` en local y `<carpeta del dominio>/omnimetrics-data` en Hostinger (fuera de `hbuilds`, para que los redespliegues no la borren). Se puede cambiar con `DATA_DIR`.
+- La clave de cifrado está en `secret.key` dentro de esa carpeta (o en `ENCRYPTION_KEY`). No la compartas ni la subas a git. Si la pierdes, vuelve a conectar las plataformas y todos deberán iniciar sesión de nuevo.
 - Si una plataforma falla por versión de API, cambia `META_API_VERSION`, `GOOGLE_ADS_API_VERSION` o `LINKEDIN_API_VERSION` en `.env.local`.
 
 ## Conectar con un clic ("Iniciar sesión con Google / Meta")
