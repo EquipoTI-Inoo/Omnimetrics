@@ -89,7 +89,8 @@ export const GoogleAds = {
                 ad_group_criterion.quality_info.quality_score, campaign.name, metrics.impressions, metrics.clicks,
                 metrics.cost_micros, metrics.conversions
                 FROM keyword_view WHERE ${during} ORDER BY metrics.cost_micros DESC LIMIT 200`),
-            gaql(creds, `SELECT segments.date, metrics.cost_micros, metrics.conversions_value FROM customer WHERE ${during}`),
+            gaql(creds, `SELECT segments.date, metrics.cost_micros, metrics.conversions_value, metrics.impressions, metrics.clicks,
+                metrics.conversions FROM customer WHERE ${during}`),
             // Ad level (Anuncios tab) is optional: a failure here must not break the sync
             gaql(creds, `SELECT ad_group_ad.ad.id, ad_group_ad.ad.name, ad_group_ad.ad.type, ad_group_ad.ad.final_urls,
                 ad_group_ad.ad.responsive_search_ad.headlines, ad_group_ad.status, ad_group.name, campaign.id, campaign.name,
@@ -127,6 +128,7 @@ export const GoogleAds = {
 
         const series: SeriesPoint[] = dailyRows.map((r: any) => ({
             date: r.segments.date, spend: num(r.metrics.costMicros) / 1e6, revenue: num(r.metrics.conversionsValue),
+            impressions: num(r.metrics.impressions), clicks: num(r.metrics.clicks), conversions: num(r.metrics.conversions),
         }));
 
         const ads = adRows.map((r: any) => {

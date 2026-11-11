@@ -62,4 +62,7 @@ export const withRatios = <T extends { spend: number; impressions: number; click
 export interface DateRangeQuery { start: string; end: string } // YYYY-MM-DD, inclusive
 
 /** One day of a platform's daily totals. Ad platforms report spend/revenue; GA4 reports siteRevenue. */
-export interface SeriesPoint { date: string; spend?: number; revenue?: number; siteRevenue?: number }
+export interface SeriesPoint {
+    date: string; spend?: number; revenue?: number; siteRevenue?: number;
+    impressions?: number; clicks?: number; conversions?: number;
+}

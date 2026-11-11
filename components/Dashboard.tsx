@@ -37,7 +37,7 @@ const StatCard = ({ title, value, change, sub, color, spark, invert, neutral }: 
       <div className="text-[28px] sm:text-[32px] font-bold tracking-tight break-all tabular-nums leading-none text-[#14171C] dark:text-white">{value}</div>
       <div className="flex justify-between items-end gap-2.5">
         <span className="text-xs text-[#5A606B] dark:text-gray-400 leading-snug">{sub}</span>
-        <Spark values={spark} color={color} />
+        {spark && <span title={`Evolución en el periodo (${spark.length} puntos)`}><Spark values={spark} color={color} /></span>}
       </div>
     </article>
   );
@@ -115,7 +115,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, focusWidgetId,
 
   // Daily trend from all platforms; ranges over 45 days are grouped by week (starting Monday)
   const weekly = data.trend.length > 45;
-  const buckets = new Map<string, { spend: number; revenue: number }>();
+  const buckets = new Map<string, { spend: number; revenue: number; impressions: number; clicks: number; conversions: number }>();
   for (const p of data.trend) {
     let key = p.date;
     if (weekly) {
@@ -123,9 +123,12 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, focusWidgetId,
       d.setDate(d.getDate() - (d.getDay() + 6) % 7);
       key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
     }
-    const b = buckets.get(key) || { spend: 0, revenue: 0 };
+    const b = buckets.get(key) || { spend: 0, revenue: 0, impressions: 0, clicks: 0, conversions: 0 };
     b.spend += p.spend;
     b.revenue += p.revenue;
+    b.impressions += p.impressions || 0;
+    b.clicks += p.clicks || 0;
+    b.conversions += p.conversions || 0;
     buckets.set(key, b);
   }
   const trendData = [...buckets.entries()].map(([date, b]) => ({
@@ -134,9 +137,14 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, focusWidgetId,
     roas: b.spend > 0 ? +(b.revenue / b.spend).toFixed(2) : null,
   }));
   const hasTrend = trendData.some(t => t.spend > 0);
-  const sparkOf = (vals: number[], fallback: number[]) => vals.length >= 2 && vals.some(v => v > 0) ? vals : fallback;
-  const spendSpark = sparkOf(trendData.map(t => t.spend), [4,5,5,6,6,7,8,8,9]);
-  const revenueSpark = sparkOf([...buckets.values()].map(b => b.revenue), [3,4,4,6,5,7,8,9,11]);
+  // Sparklines follow the same buckets as the trend chart. No real data -> no line (never a placeholder shape).
+  const sparkOf = (vals: number[]) => vals.length >= 2 && vals.some(v => v > 0) ? vals : null;
+  const bucketList = [...buckets.values()];
+  const spendSpark = sparkOf(bucketList.map(b => b.spend));
+  const revenueSpark = sparkOf(bucketList.map(b => b.revenue));
+  const conversionsSpark = sparkOf(bucketList.map(b => b.conversions));
+  // CTR per bucket; buckets without impressions are skipped instead of drawn as 0%
+  const ctrSpark = sparkOf(bucketList.filter(b => b.impressions > 0).map(b => b.clicks / b.impressions * 100));
 
   const [pipelineId, setPipelineId] = usePipelineSelection(data.kommo.pipelines, 'dashboard', false);
   const pipeline = data.kommo.pipelines.find(p => p.id === pipelineId);
@@ -170,8 +178,8 @@ export const Dashboard: React.FC<DashboardProps> = ({ onNavigate, focusWidgetId,
       <section className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-4">
         <StatCard title="Inversión total" value={money(bm.totalSpend)} change={pctChange(bm.totalSpend, pbm?.totalSpend)} neutral color="#2F5BEA" sub="Todas las fuentes" spark={spendSpark} />
         <StatCard title="Ingresos" value={money(bm.totalRevenue)} change={pctChange(bm.totalRevenue, pbm?.totalRevenue)} color="#0B8A6A" sub={`ROAS combinado ${bm.blendedRoas.toFixed(2)}x`} spark={revenueSpark} />
-        <StatCard title="Conversiones" value={bm.totalConversions.toLocaleString()} change={pctChange(bm.totalConversions, pbm?.totalConversions)} color="#8A3FC9" sub={`CPA $${bm.blendedCpa.toFixed(2)}`} spark={[5,5,6,6,7,7,8,8,9]} />
-        <StatCard title="CTR promedio" value={`${bm.blendedCtr.toFixed(2)}%`} change={pctChange(bm.blendedCtr, pbm?.blendedCtr)} color="#C98400" sub={`${bm.totalClicks.toLocaleString()} clics`} spark={[8,8,7,8,7,7,6,7,7]} />
+        <StatCard title="Conversiones" value={bm.totalConversions.toLocaleString()} change={pctChange(bm.totalConversions, pbm?.totalConversions)} color="#8A3FC9" sub={`CPA $${bm.blendedCpa.toFixed(2)}`} spark={conversionsSpark} />
+        <StatCard title="CTR promedio" value={`${bm.blendedCtr.toFixed(2)}%`} change={pctChange(bm.blendedCtr, pbm?.blendedCtr)} color="#C98400" sub={`${bm.totalClicks.toLocaleString()} clics`} spark={ctrSpark} />
       </section>
 
       {/* TENDENCIA + EMBUDO */}

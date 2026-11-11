@@ -56,7 +56,7 @@ export const LinkedIn = {
         const [byCampaign, campaignList, daily, byIndustry, byFunction, byCreative, creativeList] = await Promise.all([
             analytics('CAMPAIGN', 'ALL', `${perf},impressions,conversionValueInLocalCurrency`),
             fetchJson<any>(`https://api.linkedin.com/rest/adAccounts/${accountId}/adCampaigns?q=search&pageSize=1000`, { headers: headers(token) }),
-            analytics('ACCOUNT', 'DAILY', 'dateRange,costInLocalCurrency,conversionValueInLocalCurrency'),
+            analytics('ACCOUNT', 'DAILY', 'dateRange,costInLocalCurrency,conversionValueInLocalCurrency,impressions,clicks,externalWebsiteConversions,oneClickLeads'),
             // Demographic pivots are optional: LinkedIn hides them for small audiences
             analytics('MEMBER_INDUSTRY', 'ALL', perf).catch(() => ({ elements: [] })),
             analytics('MEMBER_JOB_FUNCTION', 'ALL', perf).catch(() => ({ elements: [] })),
@@ -85,6 +85,7 @@ export const LinkedIn = {
 
         const series: SeriesPoint[] = (daily.elements || []).map((r: any) => ({
             date: fromLiDate(r.dateRange.start), spend: num(r.costInLocalCurrency), revenue: num(r.conversionValueInLocalCurrency),
+            impressions: num(r.impressions), clicks: num(r.clicks), conversions: num(r.externalWebsiteConversions) + num(r.oneClickLeads),
         }));
 
         const topIndustries = (byIndustry.elements || [])

@@ -44,7 +44,7 @@ export const TikTok = {
             ...chunks(range.start, range.end, 30).map(w => report({
                 data_level: 'AUCTION_ADVERTISER',
                 dimensions: ['stat_time_day'],
-                metrics: ['spend', 'complete_payment_roas'],
+                metrics: ['spend', 'complete_payment_roas', 'impressions', 'clicks', 'conversion'],
             }, w)),
         ]);
 
@@ -90,7 +90,10 @@ export const TikTok = {
 
         const series: SeriesPoint[] = dailyReports.flatMap((d: any) => d?.list || []).map((r: any) => {
             const spend = num(r.metrics.spend);
-            return { date: String(r.dimensions.stat_time_day).slice(0, 10), spend, revenue: spend * num(r.metrics.complete_payment_roas) };
+            return {
+                date: String(r.dimensions.stat_time_day).slice(0, 10), spend, revenue: spend * num(r.metrics.complete_payment_roas),
+                impressions: num(r.metrics.impressions), clicks: num(r.metrics.clicks), conversions: num(r.metrics.conversion),
+            };
         });
 
         return { tiktok: { campaigns, videos }, series };

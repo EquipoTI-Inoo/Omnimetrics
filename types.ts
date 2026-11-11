@@ -48,6 +48,9 @@ export interface TrendPoint {
     date: string; // YYYY-MM-DD
     spend: number;
     revenue: number;
+    impressions?: number;
+    clicks?: number;
+    conversions?: number;
 }
 
 // --- BLENDED METRICS ---

@@ -327,6 +327,9 @@ export const generateTrend = (range: DateRange): TrendPoint[] => {
             date: `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`,
             spend,
             revenue: Math.round(spend * getRandomFloat(2.6, 4.4)),
+            impressions: Math.round(spend * getRandomFloat(60, 90)),
+            clicks: Math.round(spend * getRandomFloat(1.1, 1.8)),
+            conversions: Math.round(spend * getRandomFloat(0.02, 0.04)),
         });
         d.setDate(d.getDate() + 1);
     }

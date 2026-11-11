@@ -165,17 +165,21 @@ const buildSync = async (start: string, end: string, opts: SyncOptions = {}) => 
     }));
 
     // Daily trend across platforms. Revenue follows the dashboard rule: GA4 site revenue when available, else ad-reported value.
-    const byDay = new Map(eachDay(start, end).map(d => [d, { spend: 0, revenue: 0, siteRevenue: 0 }]));
+    const byDay = new Map(eachDay(start, end).map(d => [d, { spend: 0, revenue: 0, siteRevenue: 0, impressions: 0, clicks: 0, conversions: 0 }]));
     for (const p of series) {
         const day = byDay.get(p.date);
         if (!day) continue;
         day.spend += p.spend || 0;
         day.revenue += p.revenue || 0;
         day.siteRevenue += p.siteRevenue || 0;
+        day.impressions += p.impressions || 0;
+        day.clicks += p.clicks || 0;
+        day.conversions += p.conversions || 0;
     }
     const useSite = [...byDay.values()].some(d => d.siteRevenue > 0);
     data.trend = [...byDay.entries()].map(([date, d]) => ({
         date, spend: +d.spend.toFixed(2), revenue: +(useSite ? d.siteRevenue : d.revenue).toFixed(2),
+        impressions: d.impressions, clicks: d.clicks, conversions: +d.conversions.toFixed(2),
     }));
 
     return { data, errors, warnings, connected: connections.map(c => c.platform), syncedAt: new Date().toISOString() };

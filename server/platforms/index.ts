@@ -32,5 +32,5 @@ export const emptyData = () => ({
     tiktok: { campaigns: [], videos: [] },
     kommo: { pipelines: [], agents: [], channels: [], salesHistory: [], lossReasons: [] },
     ga4: { sessions: 0, revenue: 0, users: 0, conversionRate: '0%', bounceRate: '0%', avgSessionDuration: '0s', sources: [], cities: [] },
-    trend: [] as { date: string; spend: number; revenue: number }[],
+    trend: [] as { date: string; spend: number; revenue: number; impressions?: number; clicks?: number; conversions?: number }[],
 });

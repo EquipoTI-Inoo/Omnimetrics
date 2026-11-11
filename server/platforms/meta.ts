@@ -93,7 +93,7 @@ export const Meta = {
             opts.light ? none : getAll(graph(`${adAccountId}/campaigns`, { fields: 'id,effective_status', limit: '500' }, token)),
             opts.light ? none : insights({ level: 'account', fields: metrics, breakdowns: 'age,gender' }),
             opts.light ? none : insights({ level: 'account', fields: metrics, breakdowns: 'country,region' }),
-            opts.light ? none : insights({ level: 'account', fields: 'spend,action_values', time_increment: '1' }),
+            opts.light ? none : insights({ level: 'account', fields: metrics, time_increment: '1' }),
             // Thumbnails are optional: a failure here must not break the sync
             opts.light ? none : getAll(graph(`${adAccountId}/ads`, { fields: 'id,effective_status,creative{thumbnail_url,image_url,object_type}', limit: '500' }, token)).catch(() => []),
         ]);
@@ -147,7 +147,10 @@ export const Meta = {
             return { region: r.region, country: r.country, spend, conversions: conversionsOf(r), roas: spend > 0 ? +(revenue / spend).toFixed(2) : 0 };
         }).sort((a, b) => b.spend - a.spend).slice(0, 25);
 
-        const series: SeriesPoint[] = dailyRows.map((r: any) => ({ date: r.date_start, spend: num(r.spend), revenue: revenueOf(r) }));
+        const series: SeriesPoint[] = dailyRows.map((r: any) => ({
+            date: r.date_start, spend: num(r.spend), revenue: revenueOf(r),
+            impressions: num(r.impressions), clicks: num(r.clicks), conversions: conversionsOf(r),
+        }));
 
         return { meta: { campaigns, ads, demographics, geo }, series };
     },
