@@ -23,7 +23,7 @@ fs.mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
 
 // One-time move: bring data saved by a deploy that still kept it next to the code
 if (DATA_DIR !== LEGACY_DATA_DIR && !fs.existsSync(path.join(DATA_DIR, 'secret.key'))) {
-    for (const file of ['secret.key', 'connections.enc', 'shares.enc']) {
+    for (const file of ['secret.key', 'connections.enc', 'shares.enc', 'users.enc']) {
         const from = path.join(LEGACY_DATA_DIR, file);
         if (fs.existsSync(from)) fs.copyFileSync(from, path.join(DATA_DIR, file));
     }
