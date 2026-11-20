@@ -103,7 +103,7 @@ const metaExchange = async (req: Request, code: string) => {
     };
 };
 
-const metaAccounts = async (token: string): Promise<{ identity?: string; accounts: Account[] }> => {
+export const metaAccounts = async (token: string): Promise<{ identity?: string; accounts: Account[] }> => {
     const me: any = await fetchJson(`https://graph.facebook.com/${META_VERSION()}/me?${new URLSearchParams({ fields: 'name', access_token: token })}`)
         .catch(() => ({}));
     const accounts: Account[] = [];

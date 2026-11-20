@@ -70,8 +70,8 @@ export const ShareLinks: React.FC = () => {
         contraseña, y no tendrá acceso a conexiones, ajustes, Insights IA ni al Constructor.
       </p>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        El enlace guarda las <b>cuentas conectadas en este momento</b>: si después conectas las cuentas de otro cliente, este enlace
-        seguirá mostrando las métricas originales.
+        Si el cliente tiene <b>cuentas asignadas</b> (Meta Ads / Kommo, en Gestionar cuentas), el enlace muestra solo esas. Si no tiene,
+        guarda las cuentas conectadas en este momento y las sigue mostrando aunque después conectes las de otro cliente.
       </p>
 
       {clients.length === 0 && (

@@ -1,6 +1,9 @@
 import React, { useEffect, useState } from 'react';
-import { UserPlus, Trash2, ShieldCheck, User as UserIcon, Eye, EyeOff } from 'lucide-react';
-import { Api, AppUser, Role, ROLE_LABELS } from '../services/apiClient';
+import { UserPlus, Trash2, ShieldCheck, User as UserIcon, Eye, EyeOff, Pencil } from 'lucide-react';
+import { Api, AppUser, ClientOptions, Role, ROLE_LABELS } from '../services/apiClient';
+import { ClientAccountsPicker, EMPTY_PICK, PickerValue, pickFromAccounts, pickIncomplete, toAccountsInput } from './ClientAccountsPicker';
+
+const PLATFORM_LABELS: Record<string, string> = { meta: 'Meta Ads', kommo: 'Kommo' };
 
 const USERNAME_RE = /^[a-z0-9._-]{3,32}$/;
 const MIN_PASSWORD = 8;
@@ -17,6 +20,37 @@ export const Accounts: React.FC<{ currentUser: AppUser }> = ({ currentUser }) =>
   const [notice, setNotice] = useState('');
   const [confirmId, setConfirmId] = useState<string | null>(null);
 
+  // Cuentas de Meta / Kommo para asignar a clientes (se cargan una vez, cuando hacen falta)
+  const [pick, setPick] = useState<PickerValue>(EMPTY_PICK);
+  const [options, setOptions] = useState<ClientOptions | null>(null);
+  const [optionsLoading, setOptionsLoading] = useState(false);
+  const [optionsError, setOptionsError] = useState('');
+  const loadOptions = () => {
+    if (options || optionsLoading) return;
+    setOptionsLoading(true);
+    Api.clientOptions().then(setOptions).catch(e => setOptionsError(e.message)).finally(() => setOptionsLoading(false));
+  };
+  useEffect(() => { if (role === 'client') loadOptions(); }, [role]);
+
+  // Edición de las cuentas de un cliente existente
+  const [editId, setEditId] = useState<string | null>(null);
+  const [editPick, setEditPick] = useState<PickerValue>(EMPTY_PICK);
+  const [editBusy, setEditBusy] = useState(false);
+  const [editError, setEditError] = useState('');
+  const startEdit = (u: AppUser) => {
+    setEditId(u.id); setEditPick(pickFromAccounts(u.accounts)); setEditError(''); setConfirmId(null);
+    loadOptions();
+  };
+  const saveEdit = async (u: AppUser) => {
+    setEditBusy(true); setEditError(''); setNotice('');
+    try {
+      await Api.userSetAccounts(u.id, toAccountsInput(editPick));
+      setEditId(null);
+      setNotice(`Cuentas de "${u.username}" actualizadas.`);
+      await load();
+    } catch (err: any) { setEditError(err.message); } finally { setEditBusy(false); }
+  };
+
   const load = () => Api.users().then(setUsers).catch(e => setError(e.message));
   useEffect(() => { load(); }, []);
 
@@ -28,8 +62,8 @@ export const Accounts: React.FC<{ currentUser: AppUser }> = ({ currentUser }) =>
     e.preventDefault();
     setBusy(true); setError(''); setNotice('');
     try {
-      const u = await Api.userCreate(cleanUsername, password, role);
-      setUsername(''); setPassword(''); setRole('client');
+      const u = await Api.userCreate(cleanUsername, password, role, role === 'client' ? toAccountsInput(pick) : {});
+      setUsername(''); setPassword(''); setRole('client'); setPick(EMPTY_PICK);
       setNotice(`Cuenta "${u.username}" creada como ${ROLE_LABELS[u.role].toLowerCase()}. Comparte el usuario y la contraseña con esa persona.`);
       await load();
     } catch (err: any) { setError(err.message); } finally { setBusy(false); }
@@ -48,7 +82,7 @@ export const Accounts: React.FC<{ currentUser: AppUser }> = ({ currentUser }) =>
   const field = 'w-full border border-gray-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white bg-white dark:bg-slate-700 outline-none focus:ring-2 focus:ring-indigo-500';
   const groups: { role: Role; title: string; hint: string }[] = [
     { role: 'admin', title: 'Administradores', hint: 'Ven toda la app, conectan cuentas, crean enlaces y gestionan cuentas.' },
-    { role: 'client', title: 'Clientes', hint: 'Solo pueden abrir los enlaces que les compartas desde Ajustes → Compartir por enlace.' },
+    { role: 'client', title: 'Clientes', hint: 'Solo pueden abrir los enlaces que les compartas desde Ajustes → Compartir por enlace, y solo ven las cuentas que les asignes.' },
   ];
 
   return (
@@ -97,9 +131,15 @@ export const Accounts: React.FC<{ currentUser: AppUser }> = ({ currentUser }) =>
             ))}
           </div>
         </fieldset>
+        {role === 'client' && (
+          <fieldset className="mt-4 pt-4 border-t border-gray-100 dark:border-slate-700">
+            <legend className="sr-only">Cuentas del cliente</legend>
+            <ClientAccountsPicker idPrefix="new" options={options} loading={optionsLoading} error={optionsError} value={pick} onChange={setPick} />
+          </fieldset>
+        )}
         {error && <p className="text-sm text-red-600 mt-4">{error}</p>}
         {notice && <p className="text-sm text-green-700 dark:text-green-400 mt-4">{notice}</p>}
-        <button type="submit" disabled={busy || !USERNAME_RE.test(cleanUsername) || password.length < MIN_PASSWORD}
+        <button type="submit" disabled={busy || !USERNAME_RE.test(cleanUsername) || password.length < MIN_PASSWORD || (role === 'client' && pickIncomplete(pick))}
           className="mt-4 bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 transition disabled:opacity-50">
           {busy ? 'Creando…' : 'Crear cuenta'}
         </button>
@@ -129,6 +169,17 @@ export const Accounts: React.FC<{ currentUser: AppUser }> = ({ currentUser }) =>
                         <p className="text-xs text-gray-500 dark:text-gray-400">
                           Creada {new Date(u.createdAt).toLocaleDateString()}{u.createdBy ? ` por ${u.createdBy}` : ''}
                         </p>
+                        {u.role === 'client' && (
+                          <div className="flex flex-wrap gap-1 mt-1.5">
+                            {u.accounts?.length ? u.accounts.map(a => (
+                              <span key={a.platform} className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-300">
+                                {PLATFORM_LABELS[a.platform] ?? a.platform}: {a.name}
+                              </span>
+                            )) : (
+                              <span className="text-[11px] text-gray-400">Sin cuentas asignadas</span>
+                            )}
+                          </div>
+                        )}
                       </div>
                       {!isMe && (confirmId === u.id ? (
                         <div className="flex flex-wrap items-center gap-2">
@@ -139,9 +190,29 @@ export const Accounts: React.FC<{ currentUser: AppUser }> = ({ currentUser }) =>
                           <button onClick={() => setConfirmId(null)} className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 dark:border-slate-600 text-gray-700 dark:text-gray-200">Cancelar</button>
                         </div>
                       ) : (
-                        <button onClick={() => setConfirmId(u.id)} aria-label={`Eliminar ${u.username}`} title="Eliminar"
-                          className="p-2 text-gray-400 hover:text-red-500"><Trash2 className="h-4 w-4" /></button>
+                        <div className="flex items-center gap-1">
+                          {u.role === 'client' && editId !== u.id && (
+                            <button onClick={() => startEdit(u)} className="flex items-center gap-1.5 px-3 py-1.5 border border-gray-200 dark:border-slate-600 rounded-lg text-xs font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700">
+                              <Pencil className="h-3.5 w-3.5" /> Editar cuentas
+                            </button>
+                          )}
+                          <button onClick={() => setConfirmId(u.id)} aria-label={`Eliminar ${u.username}`} title="Eliminar"
+                            className="p-2 text-gray-400 hover:text-red-500"><Trash2 className="h-4 w-4" /></button>
+                        </div>
                       ))}
+                      {editId === u.id && (
+                        <div className="w-full mt-2 p-4 rounded-lg bg-gray-50 dark:bg-slate-900/40 border border-gray-200 dark:border-slate-700">
+                          <ClientAccountsPicker idPrefix={`edit-${u.id}`} options={options} loading={optionsLoading} error={editError || optionsError}
+                            value={editPick} onChange={setEditPick} current={u.accounts} />
+                          <div className="flex gap-2 mt-3">
+                            <button onClick={() => saveEdit(u)} disabled={editBusy || pickIncomplete(editPick)}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50">
+                              {editBusy ? 'Guardando…' : 'Guardar cuentas'}
+                            </button>
+                            <button onClick={() => setEditId(null)} className="px-3 py-1.5 rounded-lg text-xs font-medium border border-gray-200 dark:border-slate-600 text-gray-700 dark:text-gray-200">Cancelar</button>
+                          </div>
+                        </div>
+                      )}
                     </li>
                   );
                 })}

@@ -50,6 +50,22 @@ export interface AppUser {
     createdBy?: string;
     /** Contraseña temporal: debe cambiarla antes de usar la app */
     mustChangePassword?: boolean;
+    /** Solo clientes: cuentas asignadas (Meta Ads, Kommo). Si tiene alguna, sus enlaces muestran solo estas. */
+    accounts?: AssignedAccount[];
+}
+
+export interface AssignedAccount { platform: string; name: string; accountId: string }
+
+/** Cuentas que se pueden asignar a un cliente */
+export interface ClientOptions {
+    meta: { connected: boolean; accounts: { id: string; name: string; currency?: string; group?: string }[] };
+    kommo: { accountId: string; name: string }[];
+}
+
+/** Lo que se envía al crear/editar un cliente. Ambas opcionales. */
+export interface ClientAccountsInput {
+    meta?: { adAccountId: string } | null;
+    kommo?: { accountId: string } | { subdomain: string; token: string } | null;
 }
 
 export interface ShareLink {
@@ -100,7 +116,11 @@ export const Api = {
 
     // Gestionar cuentas (solo administradores)
     users: () => request<AppUser[]>('/users'),
-    userCreate: (username: string, password: string, role: Role) => post<AppUser>('/users', { username, password, role }),
+    userCreate: (username: string, password: string, role: Role, accounts: ClientAccountsInput = {}) =>
+        post<AppUser>('/users', { username, password, role, ...accounts }),
+    userSetAccounts: (id: string, accounts: ClientAccountsInput) =>
+        request<AppUser>(`/users/${id}/accounts`, { method: 'PUT', body: JSON.stringify(accounts) }),
+    clientOptions: () => request<ClientOptions>('/client-options'),
     userDelete: (id: string) => request<{ ok: true; revokedShares: number }>(`/users/${id}`, { method: 'DELETE' }),
 
     listConnections: () => request<ConnectionStatus[]>('/connections'),

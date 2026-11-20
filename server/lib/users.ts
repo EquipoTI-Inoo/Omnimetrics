@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { DATA_DIR } from './paths';
 import { encrypt, decrypt } from './crypto';
+import type { StoredConnection } from './store';
 
 /**
  * Cuentas de usuario. Se guardan cifradas en server/data/users.enc.
@@ -23,10 +24,20 @@ export interface User {
     mustChangePassword?: boolean;
     /** Las sesiones iniciadas antes de esta fecha dejan de valer */
     passwordChangedAt?: string;
+    /**
+     * Solo clientes: cuentas asignadas (Meta Ads, Kommo), con sus credenciales. Si tiene alguna,
+     * sus enlaces muestran únicamente estas cuentas. Nunca se envían al navegador.
+     */
+    connections?: StoredConnection[];
 }
 
-/** Lo que se puede enviar al navegador (sin hash ni salt) */
-export type PublicUser = Pick<User, 'id' | 'username' | 'role' | 'createdAt' | 'createdBy' | 'mustChangePassword'>;
+export interface AssignedAccount { platform: string; name: string; accountId: string }
+
+/** Lo que se puede enviar al navegador (sin hash, salt ni credenciales) */
+export type PublicUser = Pick<User, 'id' | 'username' | 'role' | 'createdAt' | 'createdBy' | 'mustChangePassword'> & { accounts: AssignedAccount[] };
+
+export const accountsOf = (conns: StoredConnection[] | undefined): AssignedAccount[] =>
+    (conns || []).map(c => ({ platform: c.platform, name: String(c.info.account || c.info.accountId || c.platform), accountId: String(c.info.accountId || '') }));
 
 /** Administrador que se crea en el primer arranque. Su contraseña es temporal: se exige cambiarla al entrar. */
 const INITIAL_ADMIN = { username: 'franciscoolaya', password: '123456' };
@@ -56,13 +67,23 @@ const DUMMY_HASH = hashPassword(crypto.randomBytes(16).toString('hex'), DUMMY_SA
 
 export const normalizeUsername = (u: unknown) => String(u ?? '').trim().toLowerCase();
 
-export const toPublic = ({ id, username, role, createdAt, createdBy, mustChangePassword }: User): PublicUser =>
-    ({ id, username, role, createdAt, createdBy, mustChangePassword: !!mustChangePassword });
+export const toPublic = ({ id, username, role, createdAt, createdBy, mustChangePassword, connections }: User): PublicUser =>
+    ({ id, username, role, createdAt, createdBy, mustChangePassword: !!mustChangePassword, accounts: accountsOf(connections) });
 
 export const Users = {
     list: (): User[] => readAll().sort((a, b) => a.username.localeCompare(b.username)),
 
     get: (id: string): User | undefined => readAll().find(u => u.id === id),
+
+    /** Reemplaza las cuentas asignadas a un cliente (lista vacía = sin cuentas propias). */
+    setConnections: (id: string, connections: StoredConnection[]): User | undefined => {
+        const all = readAll();
+        const user = all.find(u => u.id === id);
+        if (!user) return undefined;
+        if (connections.length) user.connections = connections; else delete user.connections;
+        writeAll(all);
+        return user;
+    },
 
     create: (username: string, password: string, role: Role, createdBy?: string, mustChangePassword = false): User => {
         const all = readAll();

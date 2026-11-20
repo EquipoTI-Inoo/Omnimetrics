@@ -13,7 +13,7 @@ const { createSessionToken, verifySessionToken } = await import('./lib/crypto');
 const { Store } = await import('./lib/store');
 type StoredConnection = import('./lib/store').StoredConnection;
 const { Shares, SHARE_PAGES, toPublicShare, isExpired } = await import('./lib/shares');
-const { Users, USERNAME_RE, MIN_PASSWORD, normalizeUsername, toPublic } = await import('./lib/users');
+const { Users, USERNAME_RE, MIN_PASSWORD, normalizeUsername, toPublic, accountsOf } = await import('./lib/users');
 type User = import('./lib/users').User;
 const { SyncCache } = await import('./lib/syncCache');
 const { ApiError } = await import('./lib/http');
@@ -21,7 +21,7 @@ const { eachDay } = await import('./lib/dates');
 type SeriesPoint = import('./lib/http').SeriesPoint;
 const { PLATFORMS, isPlatform, emptyData } = await import('./platforms/index');
 const { Meta } = await import('./platforms/meta');
-const { oauthRouter } = await import('./oauth');
+const { oauthRouter, metaAccounts } = await import('./oauth');
 
 // PORT lo asigna el hosting (Hostinger); API_PORT es para desarrollo local
 const PORT = Number(process.env.PORT || process.env.API_PORT || 4000);
@@ -137,19 +137,84 @@ const platformParam = (req: Request) => {
 // --- GESTIONAR CUENTAS (solo administradores) ---
 app.get('/api/users', (_req, res) => res.json(Users.list().map(toPublic)));
 
-app.post('/api/users', (req, res) => {
+/** Cuentas de Kommo que se pueden asignar: la conectada ahora y las ya asignadas a clientes (sin repetir). */
+const kommoSources = (): StoredConnection[] => {
+    const seen = new Set<string>();
+    return [Store.get('kommo'), ...Users.list().flatMap(u => u.connections || [])]
+        .filter((c): c is StoredConnection => !!c && c.platform === 'kommo' && !!c.info.accountId)
+        .filter(c => !seen.has(c.info.accountId) && !!seen.add(c.info.accountId));
+};
+
+/**
+ * Cuentas asignadas a un cliente (ambas opcionales):
+ * - meta: { adAccountId } — una cuenta publicitaria accesible con el token de Meta conectado.
+ * - kommo: { accountId } de una cuenta ya conocida, o { subdomain, token } para una nueva.
+ * Se validan contra la API real antes de guardarlas.
+ */
+const resolveClientAccounts = async (body: any): Promise<StoredConnection[]> => {
+    const out: StoredConnection[] = [];
+    const connectedAt = new Date().toISOString();
+
+    const adAccountId = String(body?.meta?.adAccountId ?? '').trim();
+    if (adAccountId) {
+        const live = Store.get('meta');
+        if (!live?.credentials.token) throw new ApiError('Conecta Meta en Conexiones para poder asignar una cuenta publicitaria.');
+        const r = await PLATFORMS.meta.connect({ token: live.credentials.token, adAccountId })
+            .catch((e: any) => { throw new ApiError(`Meta Ads: ${e.message}`, 400); });
+        out.push({ platform: 'meta', ...r, connectedAt });
+    }
+
+    const k = body?.kommo;
+    if (k?.accountId) {
+        const found = kommoSources().find(c => c.info.accountId === String(k.accountId));
+        if (!found) throw new ApiError('La cuenta de Kommo elegida ya no está disponible.');
+        out.push({ platform: 'kommo', credentials: { ...found.credentials }, info: { ...found.info }, connectedAt });
+    } else if (k?.subdomain || k?.token) {
+        const r = await PLATFORMS.kommo.connect({ subdomain: String(k.subdomain ?? ''), token: String(k.token ?? '') })
+            .catch((e: any) => { throw new ApiError(`Kommo: ${e.message}`, 400); });
+        out.push({ platform: 'kommo', ...r, connectedAt });
+    }
+    return out;
+};
+
+// Opciones para asignar a un cliente: cuentas publicitarias de Meta y cuentas de Kommo conocidas
+app.get('/api/client-options', wrap(async (_req, res) => {
+    const live = Store.get('meta');
+    const meta = live?.credentials.token ? (await metaAccounts(live.credentials.token)).accounts : [];
+    res.json({
+        meta: { connected: !!live, accounts: meta },
+        kommo: kommoSources().map(c => ({ accountId: c.info.accountId, name: c.info.account || c.info.accountId })),
+    });
+}));
+
+app.post('/api/users', wrap(async (req, res) => {
     const username = normalizeUsername(req.body?.username);
     const password = typeof req.body?.password === 'string' ? req.body.password : '';
     const role = req.body?.role;
     if (!USERNAME_RE.test(username)) throw new ApiError('El usuario debe tener de 3 a 32 caracteres: letras minúsculas, números, punto, guion o guion bajo.');
     if (password.length < MIN_PASSWORD || password.length > 200) throw new ApiError(`La contraseña debe tener al menos ${MIN_PASSWORD} caracteres.`);
     if (role !== 'admin' && role !== 'client') throw new ApiError('Elige un tipo de cuenta válido.');
+    if (Users.list().some(u => u.username === username)) throw new ApiError('Ese nombre de usuario ya existe.', 409);
+    // Primero se validan las cuentas: si alguna falla, no se crea el usuario
+    const connections = role === 'client' ? await resolveClientAccounts(req.body) : [];
+    let user;
     try {
-        res.json(toPublic(Users.create(username, password, role, userOf(res).username)));
+        user = Users.create(username, password, role, userOf(res).username);
     } catch (e: any) {
         throw new ApiError(e.message, 409);
     }
-});
+    if (connections.length) user = Users.setConnections(user.id, connections)!;
+    res.json(toPublic(user));
+}));
+
+// Cambiar las cuentas asignadas a un cliente
+app.put('/api/users/:id/accounts', wrap(async (req, res) => {
+    const target = Users.get(String(req.params.id));
+    if (!target) throw new ApiError('Cuenta no encontrada.', 404);
+    if (target.role !== 'client') throw new ApiError('Solo las cuentas de cliente tienen cuentas asignadas.');
+    const connections = await resolveClientAccounts(req.body);
+    res.json(toPublic(Users.setConnections(target.id, connections)!));
+}));
 
 app.delete('/api/users/:id', (req, res) => {
     const id = String(req.params.id);
@@ -274,17 +339,32 @@ app.get('/api/data', wrap(async (req, res) => {
 }));
 
 // --- ENLACES PARA COMPARTIR (administración) ---
+/**
+ * Cuentas que muestra un enlace: las asignadas al cliente (si tiene); si no, la copia de las
+ * conexiones guardada al crear el enlace. Los enlaces antiguos sin copia usan las conexiones actuales.
+ */
+const shareConnections = (s: { clientId?: string; connections?: StoredConnection[] }) => {
+    const owner = s.clientId ? Users.get(s.clientId) : undefined;
+    return owner?.connections?.length ? owner.connections : s.connections;
+};
+
 app.get('/api/shares', (_req, res) => {
-    const names = new Map(Users.list().map(u => [u.id, u.username]));
-    res.json(Shares.list().map(s => ({ ...toPublicShare(s), clientUsername: s.clientId ? names.get(s.clientId) : undefined })));
+    const users = new Map(Users.list().map(u => [u.id, u]));
+    res.json(Shares.list().map(s => {
+        const owner = s.clientId ? users.get(s.clientId) : undefined;
+        const own = owner?.connections?.length ? accountsOf(owner.connections) : undefined;
+        return { ...toPublicShare(s), ...(own ? { accounts: own } : {}), clientUsername: owner?.username };
+    }));
 });
 
 app.post('/api/shares', (req, res) => {
     const client = Users.get(String(req.body?.clientId ?? ''));
     if (!client || client.role !== 'client') throw new ApiError('Elige la cuenta de cliente que podrá ver el enlace.');
-    // Copia de las cuentas conectadas ahora: el enlace seguirá mostrando estas aunque luego se conecten otras
+    // Copia de las cuentas conectadas ahora: se usa si el cliente no tiene cuentas asignadas
     const connections = Store.list();
-    if (connections.length === 0) throw new ApiError('No hay cuentas conectadas para compartir. Conecta al menos una en Conexiones.');
+    if (connections.length === 0 && !client.connections?.length) {
+        throw new ApiError('Este cliente no tiene cuentas asignadas y no hay cuentas conectadas. Asígnale una en Gestionar cuentas o conecta una en Conexiones.');
+    }
     const label = String(req.body?.label ?? '').trim().slice(0, 60) || 'Enlace sin nombre';
     const days = req.body?.expiresInDays == null || req.body.expiresInDays === '' ? undefined : Number(req.body.expiresInDays);
     if (days !== undefined && (!Number.isInteger(days) || days < 1 || days > 365)) throw new ApiError('La vigencia debe ser de 1 a 365 días.');
@@ -293,7 +373,7 @@ app.post('/api/shares', (req, res) => {
     const pages = SHARE_PAGES.filter(p => requested.includes(p));
     if (pages.length === 0) throw new ApiError('Elige al menos una pestaña para compartir.');
     const share = Shares.create({ label, expiresInDays: days, pages, clientId: client.id, connections, createdBy: userOf(res).username });
-    res.json({ ...toPublicShare(share), clientUsername: client.username });
+    res.json({ ...toPublicShare(share), ...(client.connections?.length ? { accounts: accountsOf(client.connections) } : {}), clientUsername: client.username });
 });
 
 // Enlaces asignados al cliente que inició sesión (vigentes)
@@ -341,8 +421,8 @@ app.get('/api/shared/:token/data', wrap(async (req, res) => {
     const cached = publicCache.get(key);
     if (cached && Date.now() - cached.at < PUBLIC_TTL) return void res.json({ ...(cached.body as object), share: shareInfo });
 
-    // Enlaces antiguos (sin copia de cuentas) muestran las conexiones actuales; solo los abren administradores
-    const full = await buildSync(start, end, { background: true, light, connections: share.connections });
+    // Cuentas del cliente, o la copia del enlace (los enlaces antiguos sin copia usan las conexiones actuales)
+    const full = await buildSync(start, end, { background: true, light, connections: shareConnections(share) });
     const body = {
         data: full.data,
         connected: full.connected,
