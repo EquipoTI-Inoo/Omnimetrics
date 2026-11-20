@@ -17,7 +17,7 @@ const request = async <T>(path: string, init: RequestInit = {}): Promise<T> => {
     if (res.status === 401) throw new UnauthorizedError(body.error || 'No autenticado.');
     // Vite's proxy answers 5xx without a JSON body when the backend isn't running
     if (res.status >= 500 && !body.error) {
-        throw new Error('El backend no está corriendo. Revisa la terminal de "npm run dev" (¿falta APP_PASSWORD en .env.local?).');
+        throw new Error('El backend no está corriendo. Revisa la terminal de "npm run dev".');
     }
     if (!res.ok) throw new Error(body.error || `Error ${res.status}`);
     return body as T;
@@ -39,15 +39,44 @@ export interface OAuthAccount { id: string; name: string; group?: string; loginC
 export type SharePage = 'dashboard' | 'reports' | 'ads';
 export const SHARE_PAGE_LABELS: Record<SharePage, string> = { dashboard: 'Dashboard', reports: 'Plataformas', ads: 'Anuncios' };
 
+export type Role = 'admin' | 'client';
+export const ROLE_LABELS: Record<Role, string> = { admin: 'Administrador', client: 'Cliente' };
+
+export interface AppUser {
+    id: string;
+    username: string;
+    role: Role;
+    createdAt: string;
+    createdBy?: string;
+    /** Contraseña temporal: debe cambiarla antes de usar la app */
+    mustChangePassword?: boolean;
+}
+
 export interface ShareLink {
     id: string;
     token: string;
     label: string;
     pages?: SharePage[];
+    /** Cliente que puede abrirlo (los enlaces antiguos no tienen) */
+    clientId?: string;
+    clientUsername?: string;
+    /** Cuentas que quedaron guardadas en el enlace al crearlo */
+    accounts?: { platform: string; name: string }[];
     createdAt: string;
+    createdBy?: string;
     expiresAt?: string;
     lastViewedAt?: string;
     views: number;
+}
+
+/** Enlace visto desde la cuenta del cliente */
+export interface MyShare {
+    id: string;
+    token: string;
+    label: string;
+    pages: SharePage[];
+    createdAt: string;
+    expiresAt?: string;
 }
 
 export interface SyncResponse {
@@ -64,9 +93,15 @@ export interface SyncResponse {
 const isoDate = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
 export const Api = {
-    me: () => request<{ ok: true }>('/auth/me'),
-    login: (password: string) => post<{ ok: true }>('/auth/login', { password }),
+    me: () => request<{ user: AppUser }>('/auth/me'),
+    login: (username: string, password: string) => post<{ user: AppUser }>('/auth/login', { username, password }),
     logout: () => post('/auth/logout'),
+    changePassword: (currentPassword: string, newPassword: string) => post<{ user: AppUser }>('/auth/password', { currentPassword, newPassword }),
+
+    // Gestionar cuentas (solo administradores)
+    users: () => request<AppUser[]>('/users'),
+    userCreate: (username: string, password: string, role: Role) => post<AppUser>('/users', { username, password, role }),
+    userDelete: (id: string) => request<{ ok: true; revokedShares: number }>(`/users/${id}`, { method: 'DELETE' }),
 
     listConnections: () => request<ConnectionStatus[]>('/connections'),
     connect: (platform: string, fields: Record<string, string>) => post<{ platform: string; info: Record<string, string> }>(`/connections/${platform}`, fields),
@@ -86,12 +121,14 @@ export const Api = {
 
     // Enlaces para compartir el dashboard (solo lectura)
     shares: () => request<ShareLink[]>('/shares'),
-    shareCreate: (label: string, expiresInDays: number | undefined, pages: SharePage[]) =>
-        post<ShareLink>('/shares', { label, expiresInDays, pages }),
+    shareCreate: (label: string, expiresInDays: number | undefined, pages: SharePage[], clientId: string) =>
+        post<ShareLink>('/shares', { label, expiresInDays, pages, clientId }),
     shareRevoke: (id: string) => request(`/shares/${id}`, { method: 'DELETE' }),
-    /** Vista pública: no requiere sesión, la autoriza el token del enlace */
-    publicSync: (token: string, start: Date, end: Date, opts: { light?: boolean } = {}) =>
-        request<SyncResponse>(`/public/${encodeURIComponent(token)}/data?start=${isoDate(start)}&end=${isoDate(end)}${opts.light ? '&light=1' : ''}`),
+    /** Enlaces asignados al cliente con sesión iniciada */
+    myShares: () => request<MyShare[]>('/my/shares'),
+    /** Vista compartida: requiere la sesión del cliente asignado (o de un administrador) */
+    sharedSync: (token: string, start: Date, end: Date, opts: { light?: boolean } = {}) =>
+        request<SyncResponse>(`/shared/${encodeURIComponent(token)}/data?start=${isoDate(start)}&end=${isoDate(end)}${opts.light ? '&light=1' : ''}`),
 
     /** background: comparison fetch (lighter, doesn't overwrite each connection's sync status). fresh: manual refresh */
     sync: (start: Date, end: Date, opts: { background?: boolean; fresh?: boolean } = {}) =>

@@ -1,10 +1,10 @@
 import React, { useEffect, useState } from 'react';
-import { Eye, RefreshCw, AlertCircle, LayoutDashboard, BarChart2, Megaphone } from 'lucide-react';
+import { Eye, RefreshCw, AlertCircle, LayoutDashboard, BarChart2, Megaphone, LogOut, ArrowLeft, KeyRound } from 'lucide-react';
 import { useData } from '../context/DataContext';
 import { Dashboard } from './Dashboard';
 import { Reports } from './Reports';
 import { Ads } from './Ads';
-import { SharePage, SHARE_PAGE_LABELS } from '../services/apiClient';
+import { AppUser, SharePage, SHARE_PAGE_LABELS } from '../services/apiClient';
 
 const PAGE_ICONS: Record<SharePage, React.ElementType> = { dashboard: LayoutDashboard, reports: BarChart2, ads: Megaphone };
 
@@ -15,10 +15,11 @@ const initialTab = (): SharePage | null => {
 };
 
 /**
- * Vista pública de solo lectura (/ver/<token>). Muestra solo las pestañas que eligió quien creó el enlace
+ * Vista compartida de solo lectura (/ver/<token>). Muestra solo las pestañas que eligió quien creó el enlace
  * (Dashboard, Plataformas y/o Anuncios), sin menú lateral, ajustes ni conexiones.
+ * La abre el cliente asignado (con su sesión) o un administrador.
  */
-export const SharedView: React.FC = () => {
+export const SharedView: React.FC<{ user: AppUser; onLogout: () => void }> = ({ user, onLogout }) => {
   const { lastSync, isLoading, triggerSync, integrityReport, shareInfo } = useData();
   const pages = shareInfo?.pages ?? [];
   const [tab, setTab] = useState<SharePage | null>(initialTab);
@@ -52,6 +53,12 @@ export const SharedView: React.FC = () => {
     <div className="min-h-screen bg-[#F4F3EE] dark:bg-slate-900">
       <header className="bg-white dark:bg-slate-800 h-16 border-b border-[#E3E1D8] dark:border-slate-700 flex items-center justify-between gap-3 px-4 sm:px-8 sticky top-0 z-20">
         <div className="flex items-center gap-3 min-w-0">
+          {user.role === 'admin' && (
+            <a href="/" aria-label="Volver a OmniMetrics" title="Volver a OmniMetrics"
+              className="p-2 -ml-2 rounded-lg text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700">
+              <ArrowLeft className="h-4 w-4" />
+            </a>
+          )}
           <span className="text-lg font-bold text-[#14171C] dark:text-white truncate">{shareInfo?.label || 'OmniMetrics'}</span>
           <span className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-bold bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-slate-600 whitespace-nowrap">
             <Eye className="h-3 w-3" /> Solo lectura
@@ -69,6 +76,16 @@ export const SharedView: React.FC = () => {
             className="p-2 rounded-full border border-gray-200 dark:border-slate-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700 transition-all"
           >
             <RefreshCw className={`h-4 w-4 ${isLoading ? 'animate-spin' : ''}`} />
+          </button>
+          {user.role === 'client' && (
+            <a href="/cuenta" aria-label="Mi cuenta" title={`Mi cuenta (${user.username}): cambiar contraseña`}
+              className="p-2 rounded-full border border-gray-200 dark:border-slate-600 text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-slate-700">
+              <KeyRound className="h-4 w-4" />
+            </a>
+          )}
+          <button onClick={onLogout} title={`Cerrar sesión (${user.username})`}
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg border border-gray-200 dark:border-slate-600 text-sm font-medium text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-slate-700">
+            <LogOut className="h-4 w-4" /> <span className="hidden sm:inline">Salir</span>
           </button>
         </div>
       </header>

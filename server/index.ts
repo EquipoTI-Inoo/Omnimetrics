@@ -9,9 +9,12 @@ for (const file of ['.env.local', '.env']) {
     if (fs.existsSync(p)) process.loadEnvFile(p);
 }
 
-const { createSessionToken, verifySessionToken, safeEqual } = await import('./lib/crypto');
+const { createSessionToken, verifySessionToken } = await import('./lib/crypto');
 const { Store } = await import('./lib/store');
-const { Shares, SHARE_PAGES } = await import('./lib/shares');
+type StoredConnection = import('./lib/store').StoredConnection;
+const { Shares, SHARE_PAGES, toPublicShare, isExpired } = await import('./lib/shares');
+const { Users, USERNAME_RE, MIN_PASSWORD, normalizeUsername, toPublic } = await import('./lib/users');
+type User = import('./lib/users').User;
 const { SyncCache } = await import('./lib/syncCache');
 const { ApiError } = await import('./lib/http');
 const { eachDay } = await import('./lib/dates');
@@ -22,11 +25,9 @@ const { oauthRouter } = await import('./oauth');
 
 // PORT lo asigna el hosting (Hostinger); API_PORT es para desarrollo local
 const PORT = Number(process.env.PORT || process.env.API_PORT || 4000);
-const APP_PASSWORD = process.env.APP_PASSWORD;
-if (!APP_PASSWORD) {
-    console.error('\n✖ Falta APP_PASSWORD. Agrega una línea "APP_PASSWORD=tu-contraseña" en .env.local y reinicia.\n');
-    process.exit(1);
-}
+// Primer arranque: si aún no hay usuarios, crea el administrador inicial (con contraseña temporal que debe cambiar)
+const createdAdmin = Users.bootstrap();
+if (createdAdmin) console.log(`✔ Administrador inicial creado: usuario "${createdAdmin}". Deberá cambiar su contraseña al entrar.`);
 
 const SESSION_COOKIE = 'om_session';
 const SESSION_TTL = 7 * 24 * 60 * 60 * 1000;
@@ -41,25 +42,35 @@ const readCookie = (req: Request, name: string) =>
 
 const isHttps = (req: Request) => req.secure || req.headers['x-forwarded-proto'] === 'https';
 
+const setSession = (req: Request, res: Response, user: User) =>
+    res.cookie(SESSION_COOKIE, createSessionToken(user.id, SESSION_TTL), {
+        httpOnly: true, sameSite: 'lax', secure: isHttps(req), maxAge: SESSION_TTL, path: '/',
+    });
+
 // --- AUTH ---
 const loginAttempts = new Map<string, { count: number; until: number }>();
+const isLockedOut = (ip: string) => {
+    const a = loginAttempts.get(ip);
+    return !!a && a.count >= 5 && a.until > Date.now();
+};
+const recordFailure = (ip: string) => {
+    const a = loginAttempts.get(ip);
+    loginAttempts.set(ip, { count: (a && a.until > Date.now() ? a.count : 0) + 1, until: Date.now() + 15 * 60 * 1000 });
+};
 
 app.post('/api/auth/login', (req, res) => {
     const ip = req.ip || 'unknown';
-    const attempt = loginAttempts.get(ip);
-    if (attempt && attempt.count >= 5 && attempt.until > Date.now()) {
-        return res.status(429).json({ error: 'Demasiados intentos. Espera 15 minutos.' });
-    }
-    if (typeof req.body?.password !== 'string' || !safeEqual(req.body.password, APP_PASSWORD)) {
-        const count = (attempt && attempt.until > Date.now() ? attempt.count : 0) + 1;
-        loginAttempts.set(ip, { count, until: Date.now() + 15 * 60 * 1000 });
-        return res.status(401).json({ error: 'Contraseña incorrecta.' });
+    if (isLockedOut(ip)) return res.status(429).json({ error: 'Demasiados intentos. Espera 15 minutos.' });
+    const username = normalizeUsername(req.body?.username);
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const user = username && password && password.length <= 200 ? Users.verify(username, password) : undefined;
+    if (!user) {
+        recordFailure(ip);
+        return res.status(401).json({ error: 'Usuario o contraseña incorrectos.' });
     }
     loginAttempts.delete(ip);
-    res.cookie(SESSION_COOKIE, createSessionToken(SESSION_TTL), {
-        httpOnly: true, sameSite: 'lax', secure: isHttps(req), maxAge: SESSION_TTL, path: '/',
-    });
-    res.json({ ok: true });
+    setSession(req, res, user);
+    res.json({ user: toPublic(user) });
 });
 
 app.post('/api/auth/logout', (_req, res) => {
@@ -67,13 +78,52 @@ app.post('/api/auth/logout', (_req, res) => {
     res.json({ ok: true });
 });
 
+/**
+ * La sesión solo guarda el id: si la cuenta se elimina, pierde el acceso en su siguiente petición.
+ * Las sesiones iniciadas antes del último cambio de contraseña dejan de valer.
+ */
 const requireAuth = (req: Request, res: Response, next: NextFunction) => {
-    if (verifySessionToken(readCookie(req, SESSION_COOKIE))) return next();
-    res.status(401).json({ error: 'No autenticado.' });
+    const session = verifySessionToken(readCookie(req, SESSION_COOKIE));
+    const user = session ? Users.get(session.userId) : undefined;
+    const stale = user?.passwordChangedAt && session!.issuedAt < Date.parse(user.passwordChangedAt);
+    if (!user || stale) return void res.status(401).json({ error: 'No autenticado.' });
+    res.locals.user = user;
+    next();
 };
 
-app.get('/api/auth/me', requireAuth, (_req, res) => res.json({ ok: true }));
-app.use('/api', (req, res, next) => req.path.startsWith('/auth/') || req.path.startsWith('/public/') ? next() : requireAuth(req, res, next));
+const userOf = (res: Response) => res.locals.user as User;
+
+app.get('/api/auth/me', requireAuth, (_req, res) => res.json({ user: toPublic(userOf(res)) }));
+
+// Cambiar la propia contraseña (cualquier cuenta). Mantiene esta sesión y cierra las demás.
+app.post('/api/auth/password', requireAuth, (req, res) => {
+    const ip = req.ip || 'unknown';
+    if (isLockedOut(ip)) throw new ApiError('Demasiados intentos. Espera 15 minutos.', 429);
+    const me = userOf(res);
+    const current = typeof req.body?.currentPassword === 'string' ? req.body.currentPassword : '';
+    const next = typeof req.body?.newPassword === 'string' ? req.body.newPassword : '';
+    if (!current || current.length > 200 || !Users.verify(me.username, current)) {
+        recordFailure(ip);
+        throw new ApiError('La contraseña actual no es correcta.');
+    }
+    if (next.length < MIN_PASSWORD || next.length > 200) throw new ApiError(`La nueva contraseña debe tener al menos ${MIN_PASSWORD} caracteres.`);
+    if (next === current) throw new ApiError('La nueva contraseña debe ser distinta de la actual.');
+    const updated = Users.setPassword(me.id, next)!;
+    setSession(req, res, updated);
+    res.json({ user: toPublic(updated) });
+});
+
+// Todo /api requiere sesión. Una cuenta con contraseña temporal solo puede cambiarla.
+// Los clientes solo pueden usar sus enlaces (/shared/... y /my/shares); el resto es de administradores.
+const CLIENT_PATHS = (p: string) => p.startsWith('/shared/') || p === '/my/shares';
+app.use('/api', (req, res, next) => req.path.startsWith('/auth/') ? next() : requireAuth(req, res, next));
+app.use('/api', (req, res, next) => {
+    if (req.path.startsWith('/auth/')) return next();
+    const user = userOf(res);
+    if (user.mustChangePassword) return void res.status(403).json({ error: 'Debes cambiar tu contraseña antes de continuar.' });
+    if (CLIENT_PATHS(req.path) || user.role === 'admin') return next();
+    res.status(403).json({ error: 'Tu cuenta no tiene acceso a esta sección.' });
+});
 
 const wrap = (fn: (req: Request, res: Response) => Promise<unknown>) =>
     (req: Request, res: Response, next: NextFunction) => fn(req, res).catch(next);
@@ -83,6 +133,34 @@ const platformParam = (req: Request) => {
     if (!isPlatform(id)) throw new ApiError('Plataforma desconocida.', 404);
     return id;
 };
+
+// --- GESTIONAR CUENTAS (solo administradores) ---
+app.get('/api/users', (_req, res) => res.json(Users.list().map(toPublic)));
+
+app.post('/api/users', (req, res) => {
+    const username = normalizeUsername(req.body?.username);
+    const password = typeof req.body?.password === 'string' ? req.body.password : '';
+    const role = req.body?.role;
+    if (!USERNAME_RE.test(username)) throw new ApiError('El usuario debe tener de 3 a 32 caracteres: letras minúsculas, números, punto, guion o guion bajo.');
+    if (password.length < MIN_PASSWORD || password.length > 200) throw new ApiError(`La contraseña debe tener al menos ${MIN_PASSWORD} caracteres.`);
+    if (role !== 'admin' && role !== 'client') throw new ApiError('Elige un tipo de cuenta válido.');
+    try {
+        res.json(toPublic(Users.create(username, password, role, userOf(res).username)));
+    } catch (e: any) {
+        throw new ApiError(e.message, 409);
+    }
+});
+
+app.delete('/api/users/:id', (req, res) => {
+    const id = String(req.params.id);
+    if (id === userOf(res).id) throw new ApiError('No puedes eliminar tu propia cuenta.');
+    const target = Users.get(id);
+    if (!target) throw new ApiError('Cuenta no encontrada.', 404);
+    Users.remove(id);
+    // Los enlaces de un cliente eliminado dejan de existir
+    const revokedShares = target.role === 'client' ? Shares.revokeForClient(id) : 0;
+    res.json({ ok: true, revokedShares });
+});
 
 // --- OAUTH ("Conectar con Google / Meta") ---
 app.use('/api/oauth', oauthRouter);
@@ -135,12 +213,16 @@ interface SyncOptions {
     light?: boolean;
     /** Botón "Actualizar": ignora la caché si tiene más de 1 minuto */
     force?: boolean;
+    /** Conexiones a consultar (enlaces compartidos: su copia). Por defecto, las conectadas ahora. */
+    connections?: StoredConnection[];
 }
 
 /** Consulta todas las plataformas conectadas (con caché por conexión y rango, ver lib/syncCache). */
 const buildSync = async (start: string, end: string, opts: SyncOptions = {}) => {
-    const { background, light, force } = opts;
-    const connections = Store.list();
+    const { light, force } = opts;
+    // Una copia de un enlace nunca actualiza el estado de las conexiones actuales
+    const background = opts.background || !!opts.connections;
+    const connections = opts.connections ?? Store.list();
     const data: Record<string, unknown> = emptyData();
     const errors: Record<string, string> = {};
     const warnings: Record<string, string> = {};
@@ -191,10 +273,18 @@ app.get('/api/data', wrap(async (req, res) => {
     res.json(await buildSync(start, end, { background, light: background, force: req.query.fresh === '1' }));
 }));
 
-// --- ENLACES PARA COMPARTIR (administración: requiere sesión) ---
-app.get('/api/shares', (_req, res) => res.json(Shares.list()));
+// --- ENLACES PARA COMPARTIR (administración) ---
+app.get('/api/shares', (_req, res) => {
+    const names = new Map(Users.list().map(u => [u.id, u.username]));
+    res.json(Shares.list().map(s => ({ ...toPublicShare(s), clientUsername: s.clientId ? names.get(s.clientId) : undefined })));
+});
 
 app.post('/api/shares', (req, res) => {
+    const client = Users.get(String(req.body?.clientId ?? ''));
+    if (!client || client.role !== 'client') throw new ApiError('Elige la cuenta de cliente que podrá ver el enlace.');
+    // Copia de las cuentas conectadas ahora: el enlace seguirá mostrando estas aunque luego se conecten otras
+    const connections = Store.list();
+    if (connections.length === 0) throw new ApiError('No hay cuentas conectadas para compartir. Conecta al menos una en Conexiones.');
     const label = String(req.body?.label ?? '').trim().slice(0, 60) || 'Enlace sin nombre';
     const days = req.body?.expiresInDays == null || req.body.expiresInDays === '' ? undefined : Number(req.body.expiresInDays);
     if (days !== undefined && (!Number.isInteger(days) || days < 1 || days > 365)) throw new ApiError('La vigencia debe ser de 1 a 365 días.');
@@ -202,7 +292,15 @@ app.post('/api/shares', (req, res) => {
     // Orden fijo y sin duplicados; cualquier valor desconocido se descarta
     const pages = SHARE_PAGES.filter(p => requested.includes(p));
     if (pages.length === 0) throw new ApiError('Elige al menos una pestaña para compartir.');
-    res.json(Shares.create(label, days, pages));
+    const share = Shares.create({ label, expiresInDays: days, pages, clientId: client.id, connections, createdBy: userOf(res).username });
+    res.json({ ...toPublicShare(share), clientUsername: client.username });
+});
+
+// Enlaces asignados al cliente que inició sesión (vigentes)
+app.get('/api/my/shares', (_req, res) => {
+    const me = userOf(res);
+    res.json(Shares.list().filter(s => me.role === 'client' && s.clientId === me.id && !isExpired(s))
+        .map(s => ({ id: s.id, token: s.token, label: s.label, pages: Shares.pagesOf(s), createdAt: s.createdAt, expiresAt: s.expiresAt })));
 });
 
 app.delete('/api/shares/:id', (req, res) => {
@@ -210,14 +308,14 @@ app.delete('/api/shares/:id', (req, res) => {
     res.json({ ok: true });
 });
 
-// --- VISTA PÚBLICA DE SOLO LECTURA (sin sesión: la protege el token del enlace) ---
-// Solo entrega las métricas del dashboard. Nunca credenciales, mensajes de error de las plataformas ni ajustes.
+// --- VISTA COMPARTIDA DE SOLO LECTURA (requiere sesión del cliente asignado, o de un administrador) ---
+// Solo entrega las métricas. Nunca credenciales, mensajes de error de las plataformas ni ajustes.
 const publicHits = new Map<string, { count: number; reset: number }>();
 const publicCache = new Map<string, { at: number; body: unknown }>();
 const PUBLIC_TTL = 60_000;
 const MAX_RANGE_DAYS = 366;
 
-app.get('/api/public/:token/data', wrap(async (req, res) => {
+app.get('/api/shared/:token/data', wrap(async (req, res) => {
     res.set({ 'Cache-Control': 'no-store', 'X-Robots-Tag': 'noindex', 'Referrer-Policy': 'no-referrer' });
 
     const ip = req.ip || 'unknown';
@@ -227,21 +325,24 @@ app.get('/api/public/:token/data', wrap(async (req, res) => {
 
     const share = Shares.find(String(req.params.token));
     if (!share) throw new ApiError('Enlace no válido o vencido.', 404);
+    const me = userOf(res);
+    if (me.role !== 'admin' && share.clientId !== me.id) throw new ApiError('Este enlace no está asignado a tu cuenta.', 403);
 
     const { start, end } = parseRange(req);
     if ((Date.parse(end) - Date.parse(start)) / 864e5 > MAX_RANGE_DAYS) throw new ApiError('El rango máximo es de 1 año.');
 
-    if (!share.lastViewedAt || Date.now() - Date.parse(share.lastViewedAt) > 30_000) Shares.touch(share.id);
+    // Solo cuentan las visitas del cliente (no las revisiones de un administrador)
+    if (me.role === 'client' && (!share.lastViewedAt || Date.now() - Date.parse(share.lastViewedAt) > 30_000)) Shares.touch(share.id);
 
-    // Caché corto: muchas visitas al mismo link no multiplican las consultas a Meta/Google
-    // La caché es por rango (compartida entre enlaces): los datos propios del enlace se agregan después
+    // Caché corto por enlace: muchas visitas no multiplican las consultas a Meta/Google
     const shareInfo = { label: share.label, pages: Shares.pagesOf(share) };
     const light = req.query.light === '1';
-    const key = `${start}|${end}|${light ? 'L' : 'F'}`;
+    const key = `${share.id}|${start}|${end}|${light ? 'L' : 'F'}`;
     const cached = publicCache.get(key);
     if (cached && Date.now() - cached.at < PUBLIC_TTL) return void res.json({ ...(cached.body as object), share: shareInfo });
 
-    const full = await buildSync(start, end, { background: true, light });
+    // Enlaces antiguos (sin copia de cuentas) muestran las conexiones actuales; solo los abren administradores
+    const full = await buildSync(start, end, { background: true, light, connections: share.connections });
     const body = {
         data: full.data,
         connected: full.connected,

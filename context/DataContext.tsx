@@ -214,8 +214,8 @@ export const DataProvider: React.FC<{ children: ReactNode; onUnauthorized: () =>
     // The previous period (same length, right before) feeds the % change badges; if it fails, badges just hide.
     try {
         const [res, prev] = await Promise.all([
-            shareToken ? Api.publicSync(shareToken, dateRange.startDate, dateRange.endDate) : Api.sync(dateRange.startDate, dateRange.endDate, { fresh }),
-            (shareToken ? Api.publicSync(shareToken, prevRange.startDate, prevRange.endDate, { light: true }) : Api.sync(prevRange.startDate, prevRange.endDate, { background: true })).catch(() => null),
+            shareToken ? Api.sharedSync(shareToken, dateRange.startDate, dateRange.endDate) : Api.sync(dateRange.startDate, dateRange.endDate, { fresh }),
+            (shareToken ? Api.sharedSync(shareToken, prevRange.startDate, prevRange.endDate, { light: true }) : Api.sync(prevRange.startDate, prevRange.endDate, { background: true })).catch(() => null),
         ]);
         setData(res.data);
         setPreviousData(prev ? prev.data : null);

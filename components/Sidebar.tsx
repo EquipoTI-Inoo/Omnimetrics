@@ -1,5 +1,5 @@
 import React from 'react';
-import { LayoutDashboard, BarChart2, Sparkles, HelpCircle, Settings, Plug, Wrench, X, Megaphone } from 'lucide-react';
+import { LayoutDashboard, BarChart2, Sparkles, HelpCircle, Settings, Plug, Wrench, X, Megaphone, Users } from 'lucide-react';
 import { useData } from '../context/DataContext';
 
 interface SidebarProps {
@@ -18,6 +18,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ activePage, setPage, isOpen, o
     { id: 'insights', label: 'Insights IA', icon: Sparkles },
     { id: 'connections', label: 'Conexiones', icon: Plug },
     { id: 'builder', label: 'Constructor', icon: Wrench },
+    { id: 'accounts', label: 'Gestionar cuentas', icon: Users },
     { id: 'help', label: 'Ayuda', icon: HelpCircle },
     { id: 'settings', label: 'Ajustes', icon: Settings },
   ];

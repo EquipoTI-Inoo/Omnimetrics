@@ -11,13 +11,18 @@ import { Settings } from './components/Settings';
 import { Profile } from './components/Profile';
 import { Notifications } from './components/Notifications';
 import { SupportChat } from './components/SupportChat';
-import { Bell, RefreshCw, Database, FlaskConical, Menu } from 'lucide-react';
+import { Bell, RefreshCw, Database, FlaskConical, Menu, LogOut } from 'lucide-react';
 import { DataProvider, useData } from './context/DataContext';
 import { Login } from './components/Login';
 import { SharedView } from './components/SharedView';
-import { Api, UnauthorizedError } from './services/apiClient';
+import { Accounts } from './components/Accounts';
+import { ClientHome } from './components/ClientHome';
+import { ChangePasswordPage } from './components/ChangePassword';
+import { Api, AppUser, UnauthorizedError } from './services/apiClient';
 
-const AppContent: React.FC = () => {
+const PAGE_TITLES: Record<string, string> = { reports: 'Plataformas', ads: 'Anuncios', builder: 'Constructor', accounts: 'Gestionar cuentas' };
+
+const AppContent: React.FC<{ user: AppUser; onLogout: () => void }> = ({ user, onLogout }) => {
   // Coming back from "Conectar con Google / Meta" lands on Conexiones to pick the account
   const [currentPage, setCurrentPage] = useState(() =>
     new URLSearchParams(window.location.search).has('oauth_target') ? 'connections' : 'dashboard');
@@ -63,9 +68,11 @@ const AppContent: React.FC = () => {
       case 'settings':
         return <Settings isDark={theme === 'dark'} setTheme={setTheme} />;
       case 'profile':
-        return <Profile />;
+        return <Profile user={user} />;
       case 'notifications':
         return <Notifications />;
+      case 'accounts':
+        return <Accounts currentUser={user} />;
       default:
         return <Dashboard onNavigate={navigate} focusWidgetId={focusWidgetId} />;
     }
@@ -86,7 +93,7 @@ const AppContent: React.FC = () => {
                 <Menu className="h-5 w-5" />
              </button>
              <span className="text-gray-400 dark:text-gray-500 font-medium capitalize truncate">
-                {currentPage === 'reports' ? 'Plataformas' : currentPage === 'ads' ? 'Anuncios' : currentPage === 'builder' ? 'Constructor' : currentPage}
+                {PAGE_TITLES[currentPage] ?? currentPage}
              </span>
           </div>
 
@@ -144,9 +151,15 @@ const AppContent: React.FC = () => {
             
             <button 
                 onClick={() => setCurrentPage('profile')}
-                className="h-8 w-8 shrink-0 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center text-indigo-700 dark:text-indigo-300 font-bold cursor-pointer hover:ring-2 ring-indigo-500 transition-all"
+                title={user.username}
+                className="h-8 w-8 shrink-0 bg-indigo-100 dark:bg-indigo-900 rounded-full flex items-center justify-center text-indigo-700 dark:text-indigo-300 font-bold uppercase cursor-pointer hover:ring-2 ring-indigo-500 transition-all"
             >
-              JD
+              {user.username.slice(0, 2)}
+            </button>
+
+            <button onClick={onLogout} aria-label="Cerrar sesión" title="Cerrar sesión"
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300">
+              <LogOut className="h-5 w-5" />
             </button>
           </div>
         </header>
@@ -170,42 +183,54 @@ const AppContent: React.FC = () => {
   );
 };
 
-const PrivateApp: React.FC = () => {
-    const [auth, setAuth] = useState<'checking' | 'in' | 'out'>('checking');
-    const [authError, setAuthError] = useState('');
+// Enlace compartido (/ver/<token>): vista de solo lectura, sin menú. Requiere la sesión del cliente asignado (o de un administrador).
+const SHARE_PATH = /^\/ver\/([A-Za-z0-9_-]{20,64})\/?$/;
+
+type AuthState = { status: 'checking' } | { status: 'out'; error?: string } | { status: 'in'; user: AppUser };
+
+const logout = async () => {
+    await Api.logout().catch(() => {});
+    window.location.assign('/');
+};
+
+const App: React.FC = () => {
+    const [auth, setAuth] = useState<AuthState>({ status: 'checking' });
+    const shareToken = window.location.pathname.match(SHARE_PATH)?.[1];
 
     useEffect(() => {
         Api.me()
-            .then(() => setAuth('in'))
-            .catch((e) => {
-                if (!(e instanceof UnauthorizedError)) setAuthError(e.message);
-                setAuth('out');
-            });
+            .then(({ user }) => setAuth({ status: 'in', user }))
+            .catch((e) => setAuth({ status: 'out', error: e instanceof UnauthorizedError ? undefined : e.message }));
     }, []);
 
-    if (auth === 'checking') return <div className="min-h-[100dvh] bg-[#F4F3EE] dark:bg-slate-900" />;
-    if (auth === 'out') return <Login initialError={authError} onSuccess={() => { setAuthError(''); setAuth('in'); }} />;
+    const signedOut = () => setAuth({ status: 'out' });
 
-    return (
-        <DataProvider onUnauthorized={() => setAuth('out')}>
-            <AppContent />
-        </DataProvider>
-    )
-}
+    if (auth.status === 'checking') return <div className="min-h-[100dvh] bg-[#F4F3EE] dark:bg-slate-900" />;
+    if (auth.status === 'out') {
+        return <Login initialError={auth.error} onSuccess={user => setAuth({ status: 'in', user })}
+            notice={shareToken ? 'Inicia sesión para ver el reporte que te compartieron.' : undefined} />;
+    }
 
-// Enlace compartido (/ver/<token>): vista de solo lectura, sin contraseña ni menú
-const SHARE_PATH = /^\/ver\/([A-Za-z0-9_-]{20,64})\/?$/;
-
-const App: React.FC = () => {
-    const match = window.location.pathname.match(SHARE_PATH);
-    if (match) {
+    const { user } = auth;
+    const updateUser = (u: AppUser) => setAuth({ status: 'in', user: u });
+    // Contraseña temporal (administrador inicial): no puede usar la app hasta cambiarla
+    if (user.mustChangePassword) return <ChangePasswordPage user={user} forced onChanged={updateUser} onLogout={logout} />;
+    // "Mi cuenta" (/cuenta): los clientes no tienen menú, cambian aquí su contraseña
+    if (window.location.pathname.replace(/\/$/, '') === '/cuenta') return <ChangePasswordPage user={user} onChanged={updateUser} onLogout={logout} />;
+    if (shareToken) {
         return (
-            <DataProvider shareToken={match[1]} onUnauthorized={() => {}}>
-                <SharedView />
+            <DataProvider shareToken={shareToken} onUnauthorized={signedOut}>
+                <SharedView user={user} onLogout={logout} />
             </DataProvider>
         );
     }
-    return <PrivateApp />;
+    if (user.role === 'client') return <ClientHome user={user} onLogout={logout} />;
+
+    return (
+        <DataProvider onUnauthorized={signedOut}>
+            <AppContent user={user} onLogout={logout} />
+        </DataProvider>
+    );
 };
 
 export default App;

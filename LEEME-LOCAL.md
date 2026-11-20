@@ -1,12 +1,14 @@
 # Correr OmniMetrics en local
 
 1. Abre esta carpeta en VS Code (Archivo > Abrir carpeta).
-2. Copia `.env.example` como `.env.local` y define al menos `APP_PASSWORD` (la contraseña para entrar a la app).
+2. Copia `.env.example` como `.env.local` y completa las claves de las plataformas que uses.
 3. Terminal > Nueva terminal, y ejecuta:
    npm install
    npm run dev
    (levanta el frontend en :3000 y el backend en :4000 a la vez)
-4. Abre http://localhost:3000 e ingresa con tu `APP_PASSWORD`.
+4. Abre http://localhost:3000 e ingresa con tu usuario. La primera vez existe solo el administrador
+   inicial `franciscoolaya` (contraseña temporal `123456`, se pide cambiarla al entrar). Las demás
+   cuentas se crean en "Gestionar cuentas".
 
 La app inicia en Modo Demo (datos de ejemplo). Para usar datos reales: Ajustes > desactiva Modo Demo, y conecta tus fuentes en Conexiones.
 

@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
-import { Lock } from 'lucide-react';
-import { Api } from '../services/apiClient';
+import { Lock, User } from 'lucide-react';
+import { Api, AppUser } from '../services/apiClient';
 
-export const Login: React.FC<{ onSuccess: () => void; initialError?: string }> = ({ onSuccess, initialError }) => {
+export const Login: React.FC<{ onSuccess: (user: AppUser) => void; initialError?: string; notice?: string }> = ({ onSuccess, initialError, notice }) => {
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [error, setError] = useState(initialError || '');
   const [loading, setLoading] = useState(false);
@@ -12,14 +13,16 @@ export const Login: React.FC<{ onSuccess: () => void; initialError?: string }> =
     setLoading(true);
     setError('');
     try {
-      await Api.login(password);
-      onSuccess();
+      const { user } = await Api.login(username.trim(), password);
+      onSuccess(user);
     } catch (err: any) {
       setError(err.message);
     } finally {
       setLoading(false);
     }
   };
+
+  const input = 'w-full pl-9 pr-3 h-10 border border-[#D5D2C7] dark:border-slate-600 rounded-xl bg-white dark:bg-slate-700 text-[#14171C] dark:text-white outline-none focus:ring-2 focus:ring-indigo-400';
 
   return (
     <div className="min-h-[100dvh] flex items-center justify-center bg-[#F4F3EE] dark:bg-slate-900 p-4">
@@ -31,16 +34,24 @@ export const Login: React.FC<{ onSuccess: () => void; initialError?: string }> =
             <span className="text-[11px] text-[#5A606B] dark:text-gray-400 tracking-widest uppercase">Marketing + CRM</span>
           </div>
         </div>
+        {notice && <p className="text-sm text-[#5A606B] dark:text-gray-300 bg-[#F4F3EE] dark:bg-slate-700 rounded-lg px-3 py-2">{notice}</p>}
         <div>
-          <label htmlFor="password" className="block text-sm font-semibold text-[#14171C] dark:text-white mb-1.5">Contraseña de acceso</label>
+          <label htmlFor="username" className="block text-sm font-semibold text-[#14171C] dark:text-white mb-1.5">Usuario</label>
+          <div className="relative">
+            <User className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
+            <input id="username" autoFocus autoComplete="username" autoCapitalize="none" spellCheck={false}
+              value={username} onChange={e => setUsername(e.target.value)} className={input} />
+          </div>
+        </div>
+        <div>
+          <label htmlFor="password" className="block text-sm font-semibold text-[#14171C] dark:text-white mb-1.5">Contraseña</label>
           <div className="relative">
             <Lock className="absolute left-3 top-3 h-4 w-4 text-gray-400" />
-            <input id="password" type="password" autoFocus autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)}
-              className="w-full pl-9 pr-3 h-10 border border-[#D5D2C7] dark:border-slate-600 rounded-xl bg-white dark:bg-slate-700 text-[#14171C] dark:text-white outline-none focus:ring-2 focus:ring-indigo-400" />
+            <input id="password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} className={input} />
           </div>
         </div>
         {error && <p className="text-sm text-[#A3201A] bg-[#FCE4E1] rounded-lg px-3 py-2">{error}</p>}
-        <button type="submit" disabled={loading || !password}
+        <button type="submit" disabled={loading || !username.trim() || !password}
           className="h-10 rounded-xl bg-indigo-600 text-white font-semibold disabled:opacity-50 hover:bg-indigo-700 transition-colors">
           {loading ? 'Entrando…' : 'Entrar'}
         </button>

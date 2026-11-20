@@ -34,22 +34,24 @@ export const decrypt = (payload: string): string => {
     return Buffer.concat([decipher.update(data), decipher.final()]).toString('utf8');
 };
 
-// --- Sessions: "<expiresAt>.<hmac>" signed with a key derived from the master key ---
-const SESSION_KEY = crypto.createHmac('sha256', KEY).update('omnimetrics-session').digest();
+// --- Sessions: "<userId>.<issuedAt>.<expiresAt>.<hmac>" signed with a key derived from the master key ---
+const SESSION_KEY = crypto.createHmac('sha256', KEY).update('omnimetrics-session-v2').digest();
 const sign = (value: string) => crypto.createHmac('sha256', SESSION_KEY).update(value).digest('base64url');
 
-export const createSessionToken = (ttlMs: number): string => {
-    const exp = String(Date.now() + ttlMs);
-    return `${exp}.${sign(exp)}`;
+export const createSessionToken = (userId: string, ttlMs: number): string => {
+    const now = Date.now();
+    const payload = `${userId}.${now}.${now + ttlMs}`;
+    return `${payload}.${sign(payload)}`;
 };
 
-export const verifySessionToken = (token?: string): boolean => {
-    if (!token) return false;
-    const [exp, sig] = token.split('.');
-    if (!exp || !sig) return false;
-    const expected = sign(exp);
-    if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return false;
-    return Number(exp) > Date.now();
+/** Devuelve el usuario y la hora de inicio de sesión si el token es válido y no venció. */
+export const verifySessionToken = (token?: string): { userId: string; issuedAt: number } | undefined => {
+    if (!token) return undefined;
+    const [userId, iat, exp, sig] = token.split('.');
+    if (!userId || !iat || !exp || !sig) return undefined;
+    const expected = sign(`${userId}.${iat}.${exp}`);
+    if (sig.length !== expected.length || !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) return undefined;
+    return Number(exp) > Date.now() ? { userId, issuedAt: Number(iat) } : undefined;
 };
 
 export const safeEqual = (a: string, b: string): boolean => {

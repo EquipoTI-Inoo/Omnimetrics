@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { Link2, Copy, Check, Trash2, Eye } from 'lucide-react';
-import { Api, ShareLink, SharePage, SHARE_PAGE_LABELS } from '../services/apiClient';
+import { Link2, Copy, Check, Trash2, Eye, User } from 'lucide-react';
+import { Api, AppUser, ShareLink, SharePage, SHARE_PAGE_LABELS } from '../services/apiClient';
+
+const PLATFORM_LABELS: Record<string, string> = { meta: 'Meta', google: 'Google Ads', ga4: 'GA4', linkedin: 'LinkedIn', tiktok: 'TikTok', kommo: 'Kommo' };
 
 const ALL_PAGES = Object.keys(SHARE_PAGE_LABELS) as SharePage[];
 /** Enlaces creados antes de poder elegir pestañas solo muestran el dashboard */
@@ -17,18 +19,24 @@ export const ShareLinks: React.FC = () => {
   const [pages, setPages] = useState<SharePage[]>(ALL_PAGES);
   const togglePage = (p: SharePage) =>
     setPages(cur => cur.includes(p) ? cur.filter(x => x !== p) : ALL_PAGES.filter(x => x === p || cur.includes(x)));
+  const [clients, setClients] = useState<AppUser[]>([]);
+  const [clientId, setClientId] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [copied, setCopied] = useState<string | null>(null);
 
   const load = () => Api.shares().then(setLinks).catch(e => setError(e.message));
-  useEffect(() => { load(); }, []);
+  useEffect(() => {
+    load();
+    Api.users().then(us => setClients(us.filter(u => u.role === 'client'))).catch(e => setError(e.message));
+  }, []);
 
   const create = async () => {
     setBusy(true); setError('');
     try {
-      await Api.shareCreate(label.trim(), days ? Number(days) : undefined, pages);
-      setLabel(''); setDays(''); setPages(ALL_PAGES);
+      const client = clients.find(c => c.id === clientId);
+      await Api.shareCreate(label.trim() || client?.username || '', days ? Number(days) : undefined, pages, clientId);
+      setLabel(''); setDays(''); setPages(ALL_PAGES); setClientId('');
       await load();
     } catch (e: any) { setError(e.message); } finally { setBusy(false); }
   };
@@ -58,9 +66,19 @@ export const ShareLinks: React.FC = () => {
         Compartir por enlace
       </h3>
       <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
-        Crea un enlace de solo lectura y elige qué pestañas puede ver quien lo abra. No necesita contraseña y no tendrá acceso a
-        conexiones, ajustes, Insights IA ni al Constructor.
+        Crea un enlace de solo lectura para una cuenta de cliente y elige qué pestañas puede ver. El cliente entra con su usuario y
+        contraseña, y no tendrá acceso a conexiones, ajustes, Insights IA ni al Constructor.
       </p>
+      <p className="text-sm text-gray-500 dark:text-gray-400 mb-4">
+        El enlace guarda las <b>cuentas conectadas en este momento</b>: si después conectas las cuentas de otro cliente, este enlace
+        seguirá mostrando las métricas originales.
+      </p>
+
+      {clients.length === 0 && (
+        <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4">
+          Primero crea una cuenta de cliente en <b>Gestionar cuentas</b>.
+        </p>
+      )}
 
       {isLocal && (
         <p className="text-xs text-amber-700 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 mb-4">
@@ -70,6 +88,11 @@ export const ShareLinks: React.FC = () => {
       )}
 
       <div className="flex flex-col sm:flex-row gap-2 mb-4">
+        <select value={clientId} onChange={e => setClientId(e.target.value)} aria-label="Cliente"
+          className="border border-gray-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white bg-white dark:bg-slate-700 outline-none">
+          <option value="">Elige el cliente…</option>
+          {clients.map(c => <option key={c.id} value={c.id}>{c.username}</option>)}
+        </select>
         <input value={label} onChange={e => setLabel(e.target.value)} maxLength={60} placeholder="Nombre (ej: Cliente Costa Nova)"
           aria-label="Nombre del enlace"
           className="flex-1 border border-gray-300 dark:border-slate-600 rounded-lg px-3 py-2 text-sm text-gray-900 dark:text-white bg-white dark:bg-slate-700 outline-none focus:ring-2 focus:ring-indigo-500" />
@@ -80,7 +103,7 @@ export const ShareLinks: React.FC = () => {
           <option value="30">Vence en 30 días</option>
           <option value="90">Vence en 90 días</option>
         </select>
-        <button onClick={create} disabled={busy || pages.length === 0}
+        <button onClick={create} disabled={busy || pages.length === 0 || !clientId}
           className="bg-indigo-600 text-white px-4 py-2 rounded-lg text-sm font-bold hover:bg-indigo-700 transition disabled:opacity-50 whitespace-nowrap">
           {busy ? 'Creando…' : 'Crear enlace'}
         </button>
@@ -113,6 +136,10 @@ export const ShareLinks: React.FC = () => {
                 <div className="min-w-0">
                   <p className="font-semibold text-sm text-gray-900 dark:text-white truncate">{s.label}</p>
                   <p className="text-xs text-gray-500 dark:text-gray-400 flex flex-wrap items-center gap-x-3">
+                    <span className="flex items-center gap-1 font-medium text-gray-700 dark:text-gray-300">
+                      <User className="h-3 w-3" />
+                      {s.clientUsername ?? (s.clientId ? 'Cliente eliminado' : 'Sin cliente (solo administradores)')}
+                    </span>
                     <span>Creado {new Date(s.createdAt).toLocaleDateString()}</span>
                     <span className={isExpired(s) ? 'text-red-600 font-semibold' : ''}>
                       {s.expiresAt ? (isExpired(s) ? 'Vencido' : `Vence ${new Date(s.expiresAt).toLocaleDateString()}`) : 'Sin vencimiento'}
@@ -124,6 +151,13 @@ export const ShareLinks: React.FC = () => {
                       <span key={p} className="text-[11px] font-medium px-2 py-0.5 rounded-full bg-gray-100 dark:bg-slate-700 text-gray-600 dark:text-gray-300">{SHARE_PAGE_LABELS[p]}</span>
                     ))}
                   </div>
+                  {s.accounts && s.accounts.length > 0 ? (
+                    <p className="text-[11px] text-gray-500 dark:text-gray-400 mt-1.5">
+                      Cuentas: {s.accounts.map(a => `${PLATFORM_LABELS[a.platform] ?? a.platform}: ${a.name}`).join(' · ')}
+                    </p>
+                  ) : (
+                    <p className="text-[11px] text-amber-700 dark:text-amber-400 mt-1.5">Enlace antiguo: muestra las cuentas conectadas actualmente.</p>
+                  )}
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button onClick={() => copy(s)} disabled={isExpired(s)}
