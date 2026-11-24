@@ -1,20 +1,30 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# OmniMetrics
 
-# Run and deploy your AI Studio app
+Panel de métricas publicitarias: reúne Meta Ads, Google Ads, GA4, LinkedIn Ads, TikTok Ads y Kommo en un solo lugar, con reportes, enlaces compartidos para clientes, constructor de widgets personalizados e insights con IA (Gemini).
 
-This contains everything you need to run your app locally.
+- **Frontend:** React 19 + TypeScript + Vite (`components/`, `context/`, `services/`).
+- **Backend:** Express 5 + TypeScript (`server/`). Valida y guarda cifradas las credenciales de cada plataforma, maneja el OAuth de Google y Meta, usuarios y enlaces compartidos.
+- **Despliegue:** `server.js` es el punto de entrada para hosting con Passenger (Hostinger); usa el servidor compilado en `server/dist`.
 
-View your app in AI Studio: https://ai.studio/apps/drive/1e5eoN2F8qAgn3kGXCLVJTYza0cvJYoI9
+## Correr en local
 
-## Run Locally
+Requiere Node.js 22 o superior.
 
-**Prerequisites:**  Node.js
+```bash
+npm install
+cp .env.example .env.local   # completa las claves de las plataformas que uses
+npm run dev                  # frontend en :3000 y backend en :4000
+```
 
+Abre http://localhost:3000. La app inicia en Modo Demo con datos de ejemplo; para datos reales, desactívalo en Ajustes y conecta tus fuentes en Conexiones.
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+## Producción
+
+```bash
+npm run build   # compila el frontend y el servidor (server/dist)
+npm start       # sirve app + API desde http://localhost:4000
+```
+
+## Documentación
+
+[LEEME-LOCAL.md](LEEME-LOCAL.md) tiene la guía completa: acceso inicial, carpeta de datos y clave de cifrado, configuración de OAuth (Google, Meta), credenciales por plataforma y cómo evitar el límite de consultas de Meta. Todas las variables de entorno están comentadas en [.env.example](.env.example).
